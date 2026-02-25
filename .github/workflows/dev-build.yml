@@ -1,0 +1,42 @@
+name: Dev Build (Android APK)
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: EAS Dev Build (Android)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🏗 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🏗 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🏗 Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 🚀 Build Android APK (preview)
+        run: eas build --platform android --profile preview --non-interactive
+
+      - name: 📋 Build Summary
+        run: |
+          echo "## ✅ EAS Build Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform:** Android" >> $GITHUB_STEP_SUMMARY
+          echo "- **Profile:** preview (APK)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check your [Expo dashboard](https://expo.dev) for the build status and download link." >> $GITHUB_STEP_SUMMARY

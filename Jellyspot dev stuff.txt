@@ -1,0 +1,25 @@
+eas build --profile development --platform android
+eas build -p android --profile preview
+
+bugs :
+	- seeking song doesn't work.
+
+Next Feature :
+	- Database implementation. 
+
+Pending essential features :
+	- Extract lyrics from local media files and display. (Done)
+ 	- Add delete option for local media. (Done)
+	- Crossfade.
+	- Download manager for downloading songs from jellyfin.
+	- Landscape mode specific ui. 
+	- Jellyfin quick connect. (Done)
+	- Song metadata/tag editor.
+
+Pending non-essential features :
+	- Animated Intro.
+	- Jellyfin server stats.
+	- Stats for local media.
+
+Far fetched features : (Probably will never happen)
+	- Spotify wrapped like feature.
