@@ -8,9 +8,15 @@ import { jellyfinApi } from '../api/jellyfin';
 import { useNavigation } from '@react-navigation/native';
 import { backupService } from '../services/BackupService';
 
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { HomeStackParamList } from '../types/navigation';
+import SettingsGroup from '../components/SettingsGroup';
+import SettingsItem from '../components/SettingsItem';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+
 export default function SettingsScreen() {
     const theme = useTheme();
-    const navigation = useNavigation();
+    const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
     const { user, serverUrl } = useAuthStore();
     const { sourceMode, localProfile } = useSettingsStore();
     const { width, height } = useWindowDimensions();
@@ -85,78 +91,77 @@ export default function SettingsScreen() {
                     </View>
                 </Surface>
 
-                <List.Section>
-                    <List.Subheader>General</List.Subheader>
-                    <List.Item
+                <SettingsGroup title="General">
+                    <SettingsItem
                         title="Appearance"
                         description="Colors, Player Background"
-                        left={props => <List.Icon {...props} icon="palette" />}
+                        icon="palette"
                         onPress={() => navigation.navigate('Appearance' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
-                    <List.Item
+                    <SettingsItem
                         title="Playback"
                         description="Audio Quality, Crossfade, Speed"
-                        left={props => <List.Icon {...props} icon="play-circle-outline" />}
+                        icon="play-circle-outline"
                         onPress={() => navigation.navigate('PlaybackSettings' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
-                    <List.Item
+                    <SettingsItem
                         title="Storage"
                         description="Local music folder"
-                        left={props => <List.Icon {...props} icon="folder-music" />}
+                        icon="folder-music"
                         onPress={() => navigation.navigate('StorageSettings' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
-                    <List.Item
+                    <SettingsItem
                         title="Music Sources"
                         description="Jellyfin, Local, or Both"
-                        left={props => <List.Icon {...props} icon="music-box-multiple" />}
+                        icon="music-box-multiple"
                         onPress={() => navigation.navigate('SourceModeSettings' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
-                    <List.Item
+                    <SettingsItem
                         title="Downloads"
                         description="Offline storage, network settings"
-                        left={props => <List.Icon {...props} icon="download" />}
+                        icon="download"
                         onPress={() => navigation.navigate('DownloadSettings' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
-                </List.Section>
+                </SettingsGroup>
 
-                <Divider />
-
-                <List.Section>
-                    <List.Subheader>Backup & Restore</List.Subheader>
-                    <List.Item
+                <SettingsGroup title="Backup & Restore">
+                    <SettingsItem
                         title="Export Backup"
                         description="Save settings, playlists & favorites"
-                        left={props => <List.Icon {...props} icon="export" />}
+                        icon="export"
                         onPress={handleExport}
                         disabled={isExporting}
-                        right={() => isExporting ? <Text style={{ marginRight: 16 }}>Exporting...</Text> : null}
+                        right={() => isExporting ? <Text style={{ marginRight: 16, alignSelf: 'center' }}>Exporting...</Text> : undefined}
                     />
-                    <List.Item
+                    <SettingsItem
                         title="Import Backup"
                         description="Restore from a backup file"
-                        left={props => <List.Icon {...props} icon="import" />}
+                        icon="import"
                         onPress={handleImport}
                         disabled={isImporting}
-                        right={() => isImporting ? <Text style={{ marginRight: 16 }}>Importing...</Text> : null}
+                        right={() => isImporting ? <Text style={{ marginRight: 16, alignSelf: 'center' }}>Importing...</Text> : undefined}
                     />
-                </List.Section>
+                </SettingsGroup>
 
-                <Divider />
-
-                <List.Section>
-                    <List.Subheader>About</List.Subheader>
-                    <List.Item
+                <SettingsGroup title="About">
+                    <SettingsItem
                         title="Version"
                         description="1.0.0"
-                        left={props => <List.Icon {...props} icon="information-outline" />}
+                        icon="information-outline"
                     />
-                    <List.Item
+                    <SettingsItem
                         title="Dependencies"
                         description="View Open Source Libraries"
-                        left={props => <List.Icon {...props} icon="package-variant" />}
+                        icon="package-variant"
                         onPress={() => navigation.navigate('Dependencies' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
-                </List.Section>
+                </SettingsGroup>
 
                 <View style={{ alignItems: 'center', marginTop: 24, marginBottom: 24, opacity: 0.7 }}>
                     <Text variant="displayMedium" style={{ fontFamily: 'cursive', fontStyle: 'italic', fontWeight: 'bold', color: theme.colors.primary }}>JellySpot</Text>

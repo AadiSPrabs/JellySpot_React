@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Image, FlatList, ActivityIndicator, ScrollView, Pressable, Text as RNText, Animated, InteractionManager } from 'react-native';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, StyleSheet, ActivityIndicator, ScrollView, Pressable, Text as RNText, Animated, InteractionManager } from 'react-native';
+import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import { Image } from 'expo-image';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import { jellyfinApi } from '../api/jellyfin';
@@ -11,18 +13,20 @@ import { Text, Button, List, IconButton, useTheme, Surface, Portal, Dialog, Touc
 import { LinearGradient } from 'expo-linear-gradient';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import { Loader } from '../components/Loader';
+import { Skeleton, ListItemSkeleton, CardSkeleton } from '../components/Skeleton';
 import { ShuffleFab } from '../components/ShuffleFab';
 import { DatabaseService } from '../services/DatabaseService';
 import { downloadService } from '../services/DownloadService';
 import { SongItem } from '../components/SongItem';
 import { dialogStyles } from '../utils/dialogStyles';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import ActionSheet from '../components/ActionSheet';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 
 import { HomeStackParamList } from '../types/navigation';
 
 type DetailScreenRouteProp = RouteProp<HomeStackParamList, 'Detail'>;
 
-import { Alert } from 'react-native';
+import { Alert, RefreshControl } from 'react-native';
 
 export default function DetailScreen() {
     const route = useRoute<DetailScreenRouteProp>();
@@ -41,6 +45,7 @@ export default function DetailScreen() {
     const [tracks, setTracks] = useState<any[]>([]);
     const [loading, setLoading] = useState(!getInitialItem()); // If we have item, we aren't "full screen loading"
     const [tracksLoading, setTracksLoading] = useState(true); // New state for list loading
+    const [refreshing, setRefreshing] = useState(false);
 
     const { playTrack, setQueue, currentTrack, isPlaying, addToQueueNext, addToQueueEnd } = usePlayerStore();
     const theme = useTheme();
@@ -99,6 +104,30 @@ export default function DetailScreen() {
         setIsSelectionMenuVisible(false);
     };
 
+    const onRefresh = React.useCallback(async () => {
+        setRefreshing(true);
+        if (dataSource === 'local') {
+            await localLibrary.refreshLibrary(true);
+            setTracks(localLibrary.getFilteredTracks().map(t => ({
+                Id: t.id,
+                Name: t.name,
+                AlbumArtist: t.artist,
+                Album: t.album,
+                ImageUrl: t.imageUrl,
+                RunTimeTicks: t.durationMillis * 10000,
+                streamUrl: t.streamUrl,
+                bitrate: t.bitrate,
+                codec: t.codec,
+                container: t.container,
+                lyrics: t.lyrics,
+                isFavorite: t.isFavorite
+            })));
+        } else {
+            await fetchDetails();
+        }
+        setRefreshing(false);
+    }, [dataSource, fetchDetails, localLibrary]);
+
     const handleDeleteSelected = async () => {
         setIsSelectionMenuVisible(false);
         const isLocal = dataSource === 'local';
@@ -114,7 +143,7 @@ export default function DetailScreen() {
                     const ids = Array.from(selectedTracks);
                     for (const id of ids) await jellyfinApi.deleteItem(id);
                 }
-                fetchData();
+                fetchDetails();
                 exitSelectionMode();
             } catch (error: any) {
                 console.error('Batch delete failed', error);
@@ -188,7 +217,7 @@ export default function DetailScreen() {
         return () => interactionPromise.cancel();
     }, [itemId, dataSource, localLibrary.tracks, localLibrary.selectedFolderPaths]); // Re-fetch when tracks are enriched or folder selection changes
 
-    const fetchDetails = async () => {
+    async function fetchDetails() {
         setTracksLoading(true);
         if (!item) setLoading(true); // Only show full loader if we don't have item yet
 
@@ -205,15 +234,21 @@ export default function DetailScreen() {
                     // FETCH FROM DATABASE with folder filtering for performance
                     try {
                         const { selectedFolderPaths, availableFolders } = localLibrary;
-                        let dbTracks;
+                        let dbTracks: any[] = [];
 
-                        // If no folders scanned yet, get all; if folders selected, filter by them
-                        if (availableFolders.length === 0) {
-                            dbTracks = await DatabaseService.getAllTracks();
-                        } else if (selectedFolderPaths.length === 0) {
-                            dbTracks = []; // No folders selected = no tracks
+                        // Use memory cache for instant load if available
+                        const cachedTracks = localLibrary.getFilteredTracks();
+                        if (cachedTracks.length > 0) {
+                            dbTracks = cachedTracks;
                         } else {
-                            dbTracks = await DatabaseService.getTracksByFolders(selectedFolderPaths);
+                            // If no folders scanned yet, get all; if folders selected, filter by them
+                            if (availableFolders.length === 0) {
+                                dbTracks = await DatabaseService.getAllTracks();
+                            } else if (selectedFolderPaths.length === 0) {
+                                dbTracks = []; // No folders selected = no tracks
+                            } else {
+                                dbTracks = await DatabaseService.getTracksByFolders(selectedFolderPaths);
+                            }
                         }
 
                         localTracks = dbTracks.map(t => ({
@@ -737,7 +772,10 @@ export default function DetailScreen() {
         openTrackMenu(trackId, trackEntryId);
     }, [openTrackMenu, item]);
 
-    const renderItem = React.useCallback(({ item: trackItem, index }: { item: any, index: number }) => {
+    const isDraggable = item?.Type === 'Playlist' && dataSource === 'local' && itemId !== 'liked-songs' && itemId !== 'all-songs';
+
+    const renderItem = React.useCallback(({ item: trackItem, getIndex, drag, isActive }: RenderItemParams<any>) => {
+        const index = getIndex() ?? 0;
         const isSelected = selectedTracks.has(trackItem.Id);
 
         return (
@@ -752,27 +790,31 @@ export default function DetailScreen() {
                 isSelectionMode={isSelectionMode}
                 isSelected={isSelected}
                 showEqualizer={true}
+                drag={isDraggable && !isSelectionMode ? drag : undefined}
+                isActive={isActive}
                 // DetailScreen specific:
                 getImageUrl={(t) => t.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : undefined)}
             />
         );
-    }, [handleTrackPress, handleOpenDialog, item, currentTrack, isPlaying, isSelectionMode, selectedTracks, dataSource]);
+    }, [handleTrackPress, handleOpenDialog, item, currentTrack, isPlaying, isSelectionMode, selectedTracks, dataSource, isDraggable]);
+
+    const headerImage = useMemo(() => {
+        if (!item) return null;
+        if (item.Id === 'all-songs') return null;
+        if (item.Id === 'liked-songs') return null;
+        if (item.ImageUrl) return item.ImageUrl;
+        // For Jellyfin, the item itself (Artist, Album, Playlist) usually has its own image endpoint
+        if (dataSource === 'jellyfin') return jellyfinApi.getImageUrl(item.Id);
+        // Fallback for local items without explicit images to use the first track's image
+        if (tracks.length > 0 && tracks[0].ImageUrl) return tracks[0].ImageUrl;
+        return null;
+    }, [item?.Id, item?.ImageUrl, dataSource, tracks.length > 0 ? tracks[0].ImageUrl : null]);
 
     if (loading || !item) {
         return <Loader />;
     }
 
     const renderHeader = () => {
-        const getHeaderImage = () => {
-            if (item.Id === 'all-songs') return null;
-            if (item.Id === 'liked-songs') return null;
-            if (item.ImageUrl) return item.ImageUrl;
-            if (tracks.length > 0 && tracks[0].ImageUrl) return tracks[0].ImageUrl;
-            if (dataSource === 'jellyfin') return jellyfinApi.getImageUrl(item.Id);
-            return null;
-        };
-        const headerImage = getHeaderImage();
-
         return (
             <View style={styles.header}>
                 {!headerImage ? (
@@ -873,168 +915,162 @@ export default function DetailScreen() {
                 )}
             </View>
 
-            <FlatList
+            <DraggableFlatList
                 data={tracks}
                 extraData={tracks} // Force re-render when tracks are enriched with artwork
                 renderItem={renderItem}
-                keyExtractor={(item) => item.Id}
-                ListHeaderComponent={renderHeader}
+                keyExtractor={(item, index) => `${item.Id}-${index}`} // Composite key as there might be duplicates in playlists
+                ListHeaderComponent={renderHeader()}
                 contentContainerStyle={[styles.listContent, { paddingBottom: 200 }]}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
                 getItemLayout={(data, index) => (
                     { length: 72, offset: 72 * index, index }
                 )}
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={5}
-                ListEmptyComponent={tracksLoading ? <Loader size="large" fullScreen={false} style={{ marginTop: 50 }} /> : null}
+                ListEmptyComponent={tracksLoading ? (
+                    <View style={{ paddingTop: 16 }}>
+                        {Array.from({ length: 10 }).map((_, i) => <ListItemSkeleton key={i} />)}
+                    </View>
+                ) : null}
+                onDragEnd={({ data }) => {
+                    setTracks(data); // Update UI
+                    if (isDraggable && itemId) {
+                        DatabaseService.updatePlaylistOrder(itemId, data.map(t => t.Id)).catch(console.error);
+                    }
+                }}
+                activationDistance={20}
             />
 
-            <Portal>
-                <Dialog visible={isAddToPlaylistVisible} onDismiss={() => !isAddingToPlaylist && setIsAddToPlaylistVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Add to Playlist</Dialog.Title>
-                    <Dialog.Content>
-                        {isAddingToPlaylist ? (
-                            <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
-                                <ActivityIndicator size="large" color={theme.colors.primary} />
-                                <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>Adding to playlist...</Text>
-                            </View>
-                        ) : (
-                            <ScrollView style={{ maxHeight: 300 }}>
-                                {playlists.map(playlist => (
-                                    <List.Item
-                                        key={playlist.Id}
-                                        title={playlist.Name}
-                                        left={props => <List.Icon {...props} icon="playlist-music" />}
-                                        onPress={() => handleAddToPlaylist(playlist.Id)}
-                                    />
-                                ))}
-                            </ScrollView>
-                        )}
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsAddToPlaylistVisible(false)} disabled={isAddingToPlaylist}>Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                <Dialog visible={isDuplicateDialogVisible} onDismiss={() => setIsDuplicateDialogVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Duplicate Song</Dialog.Title>
-                    <Dialog.Content>
-                        <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
-                        <Button onPress={() => pendingPlaylistId && confirmAddToPlaylist(pendingPlaylistId)}>Add Anyway</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                {/* Submenu Dialog for Playlist actions */}
-                <Dialog visible={isSubmenuVisible} onDismiss={() => setIsSubmenuVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Track Options</Dialog.Title>
-                    <Dialog.Content>
-                        <List.Item
-                            title="Play Next"
-                            description="Add to queue after current song"
-                            left={props => <List.Icon {...props} icon="playlist-play" />}
-                            onPress={handlePlayNext}
-                        />
-                        <List.Item
-                            title="Add to Queue"
-                            description="Add to end of queue"
-                            left={props => <List.Icon {...props} icon="playlist-plus" />}
-                            onPress={handleAddToQueue}
-                        />
-                        <List.Item
-                            title="Add to another playlist"
-                            left={props => <List.Icon {...props} icon="playlist-music" />}
-                            onPress={handleAddToAnotherPlaylist}
-                        />
-                        <List.Item
-                            title="Remove from this playlist"
-                            titleStyle={{ color: '#f44336' }}
-                            left={props => <List.Icon {...props} icon="playlist-remove" color="#f44336" />}
-                            onPress={handleRemoveFromPlaylist}
-                        />
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsSubmenuVisible(false)}>Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                {/* Track Options Dialog (non-playlist views) */}
-                <Dialog visible={isTrackOptionsVisible} onDismiss={() => setIsTrackOptionsVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Track Options</Dialog.Title>
-                    <Dialog.Content>
-                        <List.Item
-                            title="Play Next"
-                            description="Add to queue after current song"
-                            left={props => <List.Icon {...props} icon="playlist-play" />}
-                            onPress={handlePlayNext}
-                        />
-                        <List.Item
-                            title="Add to Queue"
-                            description="Add to end of queue"
-                            left={props => <List.Icon {...props} icon="playlist-plus" />}
-                            onPress={handleAddToQueue}
-                        />
-                        <List.Item
-                            title="Add to Playlist"
-                            description="Save to a playlist"
-                            left={props => <List.Icon {...props} icon="playlist-music" />}
-                            onPress={handleOpenAddToPlaylistFromOptions}
-                        />
-                        {/* Delete Option for Local Tracks */}
-                        {dataSource === 'local' && (
+            <ActionSheet visible={isAddToPlaylistVisible} onClose={() => !isAddingToPlaylist && setIsAddToPlaylistVisible(false)} title="Add to Playlist" scrollable>
+                <View style={{ gap: 4 }}>
+                    {isAddingToPlaylist ? (
+                        <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
+                            <ActivityIndicator size="large" color={theme.colors.primary} />
+                            <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>Adding to playlist...</Text>
+                        </View>
+                    ) : (
+                        playlists.map(playlist => (
                             <List.Item
-                                title="Delete from device"
-                                titleStyle={{ color: '#f44336' }}
-                                left={props => <List.Icon {...props} icon="delete" color="#f44336" />}
-                                onPress={handleOpenDeleteConfirm}
+                                key={playlist.Id}
+                                title={playlist.Name}
+                                left={props => <List.Icon {...props} icon="playlist-music" />}
+                                onPress={() => handleAddToPlaylist(playlist.Id)}
                             />
-                        )}
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsTrackOptionsVisible(false)}>Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
+                        ))
+                    )}
+                </View>
+            </ActionSheet>
 
-                {/* Remove Confirmation Dialog */}
-                <Dialog visible={isRemoveConfirmVisible} onDismiss={() => setIsRemoveConfirmVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Remove from Playlist</Dialog.Title>
-                    <Dialog.Content>
-                        <Text variant="bodyMedium">Are you sure you want to remove this song from the playlist?</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsRemoveConfirmVisible(false)}>Cancel</Button>
-                        <Button onPress={confirmRemoveFromPlaylist}>Remove</Button>
-                    </Dialog.Actions>
-                </Dialog>
+            <ActionSheet visible={isDuplicateDialogVisible} onClose={() => setIsDuplicateDialogVisible(false)} title="Duplicate Song" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
+                        <Button mode="contained" onPress={() => {
+                            if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
+                        }}>Add Anyway</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
-                {/* Delete Confirmation Dialog */}
-                <Dialog visible={isDeleteConfirmVisible} onDismiss={() => setIsDeleteConfirmVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Delete from Device</Dialog.Title>
-                    <Dialog.Content>
-                        <Text variant="bodyMedium">Are you sure you want to delete this file from your device? This action cannot be undone.</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsDeleteConfirmVisible(false)}>Cancel</Button>
-                        <Button onPress={handleDeleteTrack} textColor="#f44336">Delete</Button>
-                    </Dialog.Actions>
-                </Dialog>
+            {/* Submenu Dialog for Playlist actions */}
+            <ActionSheet visible={isSubmenuVisible} onClose={() => setIsSubmenuVisible(false)} title="Track Options">
+                <View style={{ gap: 4 }}>
+                    <List.Item
+                        title="Play Next"
+                        description="Add to queue after current song"
+                        left={props => <List.Icon {...props} icon="playlist-play" />}
+                        onPress={handlePlayNext}
+                    />
+                    <List.Item
+                        title="Add to Queue"
+                        description="Add to end of queue"
+                        left={props => <List.Icon {...props} icon="playlist-plus" />}
+                        onPress={handleAddToQueue}
+                    />
+                    <List.Item
+                        title="Add to another playlist"
+                        left={props => <List.Icon {...props} icon="playlist-music" />}
+                        onPress={handleAddToAnotherPlaylist}
+                    />
+                    <List.Item
+                        title="Remove from this playlist"
+                        titleStyle={{ color: '#f44336' }}
+                        left={props => <List.Icon {...props} icon="playlist-remove" color="#f44336" />}
+                        onPress={handleRemoveFromPlaylist}
+                    />
+                </View>
+            </ActionSheet>
 
-                {/* Download Confirmation Dialog */}
-                <Dialog visible={isDownloadConfirmVisible} onDismiss={() => setIsDownloadConfirmVisible(false)} style={dialogStyles.dialog}>
-                    <Dialog.Title>Download All</Dialog.Title>
-                    <Dialog.Content>
-                        <Text variant="bodyMedium">
-                            Download {tracks.length} {tracks.length === 1 ? 'song' : 'songs'} for offline listening?
-                        </Text>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsDownloadConfirmVisible(false)}>Cancel</Button>
-                        <Button onPress={handleDownloadAll}>Download</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
+            {/* Track Options Dialog (non-playlist views) */}
+            <ActionSheet visible={isTrackOptionsVisible} onClose={() => setIsTrackOptionsVisible(false)} title="Track Options">
+                <View style={{ gap: 4 }}>
+                    <List.Item
+                        title="Play Next"
+                        description="Add to queue after current song"
+                        left={props => <List.Icon {...props} icon="playlist-play" />}
+                        onPress={handlePlayNext}
+                    />
+                    <List.Item
+                        title="Add to Queue"
+                        description="Add to end of queue"
+                        left={props => <List.Icon {...props} icon="playlist-plus" />}
+                        onPress={handleAddToQueue}
+                    />
+                    <List.Item
+                        title="Add to Playlist"
+                        description="Save to a playlist"
+                        left={props => <List.Icon {...props} icon="playlist-music" />}
+                        onPress={handleOpenAddToPlaylistFromOptions}
+                    />
+                    {/* Delete Option for Local Tracks */}
+                    {dataSource === 'local' && (
+                        <List.Item
+                            title="Delete from device"
+                            titleStyle={{ color: '#f44336' }}
+                            left={props => <List.Icon {...props} icon="delete" color="#f44336" />}
+                            onPress={handleOpenDeleteConfirm}
+                        />
+                    )}
+                </View>
+            </ActionSheet>
+
+            {/* Remove Confirmation Dialog */}
+            <ActionSheet visible={isRemoveConfirmVisible} onClose={() => setIsRemoveConfirmVisible(false)} title="Remove from Playlist" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">Are you sure you want to remove this song from the playlist?</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsRemoveConfirmVisible(false)}>Cancel</Button>
+                        <Button mode="contained" buttonColor="#f44336" onPress={confirmRemoveFromPlaylist}>Remove</Button>
+                    </View>
+                </View>
+            </ActionSheet>
+
+            {/* Delete Confirmation Dialog */}
+            <ActionSheet visible={isDeleteConfirmVisible} onClose={() => setIsDeleteConfirmVisible(false)} title="Delete from Device" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">Are you sure you want to delete this file from your device? This action cannot be undone.</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDeleteConfirmVisible(false)}>Cancel</Button>
+                        <Button mode="contained" buttonColor="#f44336" onPress={handleDeleteTrack}>Delete</Button>
+                    </View>
+                </View>
+            </ActionSheet>
+
+            {/* Download Confirmation Dialog */}
+            <ActionSheet visible={isDownloadConfirmVisible} onClose={() => setIsDownloadConfirmVisible(false)} title="Download All" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">
+                        Download {tracks.length} {tracks.length === 1 ? 'song' : 'songs'} for offline listening?
+                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDownloadConfirmVisible(false)}>Cancel</Button>
+                        <Button mode="contained" onPress={handleDownloadAll}>Download</Button>
+                    </View>
+                </View>
+            </ActionSheet>
         </View>
     );
 }

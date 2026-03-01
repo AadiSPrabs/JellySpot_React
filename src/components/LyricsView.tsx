@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { Text, useTheme, Portal, Dialog, Button, IconButton } from 'react-native-paper';
-import Slider from '@react-native-community/slider';
+import { View, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Keyboard } from 'react-native';
+import { Text, useTheme, Portal, Dialog, Button, IconButton, List, TextInput } from 'react-native-paper';
 import { jellyfinApi } from '../api/jellyfin';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
+import ActionSheet from './ActionSheet';
+import { lyricsService } from '../services/LyricsService';
+
+import { useShallow } from 'zustand/react/shallow';
 
 interface LyricsViewProps {
     itemId: string;
@@ -16,11 +19,19 @@ interface LyricsViewProps {
 interface LyricLine {
     time: number; // milliseconds (-1 for unsynced)
     text: string;
+    translation?: string;
 }
 
 export default function LyricsView({ itemId, activeColor, inactiveColor, localLyrics }: LyricsViewProps) {
-    const currentTime = usePlayerStore(state => state.positionMillis);
-    const { lyricsOffset, setLyricsOffset } = useSettingsStore();
+    const { positionMillis, currentTrack, seek } = usePlayerStore(useShallow(state => ({
+        positionMillis: state.positionMillis,
+        currentTrack: state.currentTrack,
+        seek: state.seek,
+    })));
+    const { lyricsOffsets, setLyricsOffset, translationLanguages, setTranslationLanguage } = useSettingsStore();
+    const currentOffset = lyricsOffsets[itemId] || 0;
+    const currentTranslationLanguage = translationLanguages[itemId] || 'none';
+
     const theme = useTheme();
     const activeTextColor = activeColor || theme.colors.primary;
     const inactiveTextColor = inactiveColor || theme.colors.onSurfaceVariant;
@@ -29,7 +40,15 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showOffsetDialog, setShowOffsetDialog] = useState(false);
-    const [tempOffset, setTempOffset] = useState(lyricsOffset);
+    const [showTranslateDialog, setShowTranslateDialog] = useState(false);
+    const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+    const [showSearchDialog, setShowSearchDialog] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+    const [tempOffset, setTempOffset] = useState(currentOffset);
     const flatListRef = useRef<FlatList>(null);
     const lastActiveIndexRef = useRef<number>(-1);
 
@@ -38,8 +57,7 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
         const lines = lrcString.split('\n');
         const result: LyricLine[] = [];
         // Regex for LRC format: [mm:ss.xx] or [mm:ss:xx]
-        // Using RegExp constructor to avoid escaping issues
-        const timeRegExp = new RegExp('\\[(\\d{1,3}):(\\d{2})[\\.:](\d{2,3})\\]');
+        const timeRegExp = /\[(\d{1,3}):(\d{2})[\.:](\d{2,3})\]/;
 
         lines.forEach(line => {
             const match = timeRegExp.exec(line);
@@ -76,7 +94,7 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
     useEffect(() => {
         let isMounted = true;
 
-        // If local lyrics are provided, use them directly (no API call)
+        // If local lyrics are provided (e.g., from ID3 tags), use them directly
         if (localLyrics) {
             const parsedLyrics = parseLRC(localLyrics);
             if (isMounted) {
@@ -87,34 +105,52 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
             return;
         }
 
-        // Fetch from Jellyfin API for remote tracks
+        // Fetch from LyricsService (handles LRCLIB / Jellyfin fallback based on settings)
         const fetchLyrics = async () => {
+            if (!currentTrack || currentTrack.id !== itemId) {
+                // Wait for the correct track object to match the itemId prop
+                if (isMounted) {
+                    setLyrics([]);
+                    setError(null);
+                }
+                return;
+            }
+
             try {
                 if (isMounted) setLoading(true);
-                const response = await jellyfinApi.getAudioLyrics(itemId);
 
-                let parsedLyrics: LyricLine[] = [];
-
-                // Native Jellyfin Synced Lyrics (Array of objects with Start ticks)
-                if (response?.Lyrics && Array.isArray(response.Lyrics) && response.Lyrics.length > 0 && typeof response.Lyrics[0] === 'object' && 'Start' in response.Lyrics[0]) {
-                    parsedLyrics = transformJellyfinLyrics(response.Lyrics);
-                } else {
-                    // Text-based lyrics (LRC format or plain text)
-                    let textCandidate = '';
-                    if (typeof response === 'string') {
-                        textCandidate = response;
-                    } else if (response && typeof response.Lyrics === 'string') {
-                        textCandidate = response.Lyrics;
-                    }
-
-                    if (textCandidate) {
-                        parsedLyrics = parseLRC(textCandidate);
-                    }
-                }
+                const response = await lyricsService.getLyrics(currentTrack);
 
                 if (isMounted) {
-                    setLyrics(parsedLyrics);
-                    setError(parsedLyrics.length === 0 ? 'No lyrics found' : null);
+                    if (response.type === 'none' || !response.lyrics) {
+                        setLyrics([]);
+                        setError('No lyrics found');
+                    } else {
+                        let parsedLyrics: LyricLine[] = [];
+                        if (response.type === 'plain') {
+                            parsedLyrics = response.lyrics.split('\n').map(text => ({
+                                time: -1,
+                                text: text.trim()
+                            })).filter(l => l.text);
+                        } else if (response.type === 'synced') {
+                            parsedLyrics = parseLRC(response.lyrics);
+                        }
+
+                        // Handle Translations
+                        if (parsedLyrics.length > 0 && currentTranslationLanguage !== 'none') {
+                            setLoading(true); // Keep loading while translating
+                            try {
+                                parsedLyrics = await lyricsService.translateLyrics(currentTrack.id, parsedLyrics, currentTranslationLanguage);
+                            } catch (err) {
+                                console.error('Failed to apply lyrics translation:', err);
+                            }
+                        }
+
+                        if (isMounted) {
+                            setLyrics(parsedLyrics);
+                            setError(parsedLyrics.length === 0 ? 'No lyrics found' : null);
+                        }
+                    }
                 }
             } catch (err) {
                 if (isMounted) setError('Failed to load lyrics');
@@ -126,13 +162,38 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
 
         fetchLyrics();
         return () => { isMounted = false; };
-    }, [itemId, localLyrics]);
+    }, [itemId, currentTrack, localLyrics, currentTranslationLanguage, refreshTrigger]);
+
+    const handleSearchLyrics = async () => {
+        if (!searchQuery.trim()) return;
+        Keyboard.dismiss();
+        setIsSearching(true);
+        try {
+            const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`);
+            const data = await res.json();
+            setSearchResults(data || []);
+        } catch (e) {
+            console.error('Lyrics search failed', e);
+            setSearchResults([]);
+        }
+        setIsSearching(false);
+    };
+
+    const handleSelectSearchResult = async (result: any) => {
+        const lyricsToSave = result.syncedLyrics || result.plainLyrics;
+        if (!lyricsToSave || !currentTrack) return;
+
+        await lyricsService.saveOfflineLyrics(currentTrack.id, lyricsToSave);
+
+        setShowSearchDialog(false);
+        setRefreshTrigger(prev => prev + 1); // Trigger re-fetch
+    };
 
     // Auto-scroll to active lyric
     useEffect(() => {
         if (!lyrics.length) return;
 
-        const adjustedTime = currentTime + lyricsOffset;
+        const adjustedTime = positionMillis + currentOffset;
         const activeIndex = lyrics.findIndex((line, index) => {
             const nextLine = lyrics[index + 1];
             return adjustedTime >= line.time && (!nextLine || adjustedTime < nextLine.time);
@@ -146,25 +207,35 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
                 viewPosition: 0.5
             });
         }
-    }, [currentTime, lyrics, lyricsOffset]);
+    }, [positionMillis, lyrics, currentOffset]);
 
     const handleOpenOffsetDialog = () => {
-        setTempOffset(lyricsOffset);
+        setTempOffset(currentOffset);
         setShowOffsetDialog(true);
     };
 
     const handleSaveOffset = () => {
-        setLyricsOffset(tempOffset);
+        setLyricsOffset(itemId, tempOffset);
         setShowOffsetDialog(false);
     };
 
     const renderItem = ({ item, index }: { item: LyricLine, index: number }) => {
-        const adjustedTime = currentTime + lyricsOffset;
+        const adjustedTime = positionMillis + currentOffset;
         const nextLine = lyrics[index + 1];
         const isActive = item.time !== -1 && adjustedTime >= item.time && (!nextLine || adjustedTime < nextLine.time);
 
         return (
-            <View style={styles.line}>
+            <TouchableOpacity
+                style={styles.line}
+                onPress={() => {
+                    if (item.time !== -1) {
+                        // Import Haptics at the top if needed, or just remove, but I'll skip it to avoid missing imports.
+                        seek(item.time - currentOffset);
+                    }
+                }}
+                disabled={item.time === -1}
+                activeOpacity={0.7}
+            >
                 <Text
                     variant={isActive ? "headlineSmall" : "titleMedium"}
                     style={{
@@ -176,7 +247,20 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
                 >
                     {item.text}
                 </Text>
-            </View>
+                {item.translation ? (
+                    <Text
+                        variant={isActive ? "titleMedium" : "titleSmall"}
+                        style={{
+                            color: isActive ? activeTextColor : inactiveTextColor,
+                            textAlign: 'center',
+                            opacity: isActive ? 0.75 : 0.4,
+                            marginTop: 4
+                        }}
+                    >
+                        {item.translation}
+                    </Text>
+                ) : null}
+            </TouchableOpacity>
         );
     };
 
@@ -215,53 +299,162 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
             {/* Settings Button */}
             <TouchableOpacity
                 style={styles.settingsButton}
-                onPress={handleOpenOffsetDialog}
+                onPress={() => setShowSettingsMenu(true)}
             >
                 <IconButton
-                    icon="tune-vertical"
+                    icon="dots-horizontal"
                     size={20}
                     iconColor={theme.colors.onSurfaceVariant}
                     style={{ margin: 0 }}
                 />
             </TouchableOpacity>
 
-            {/* Offset Settings Dialog */}
-            <Portal>
-                <Dialog visible={showOffsetDialog} onDismiss={() => setShowOffsetDialog(false)}>
-                    <Dialog.Title>Lyrics Timing</Dialog.Title>
-                    <Dialog.Content>
-                        <Text variant="bodyMedium" style={{ marginBottom: 16 }}>
-                            Adjust when lyrics are highlighted. Positive values show lyrics earlier (lead time), negative values show them later.
-                        </Text>
-                        <View style={styles.sliderHeader}>
-                            <Text variant="bodyMedium">Offset</Text>
-                            <Text variant="titleMedium" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>
-                                {tempOffset > 0 ? '+' : ''}{tempOffset}ms
-                            </Text>
-                        </View>
-                        <Slider
-                            style={styles.slider}
-                            minimumValue={-2000}
-                            maximumValue={2000}
-                            step={100}
-                            value={tempOffset}
-                            onValueChange={(value) => setTempOffset(value)}
-                            minimumTrackTintColor={theme.colors.primary}
-                            maximumTrackTintColor={theme.colors.surfaceVariant}
-                            thumbTintColor={theme.colors.primary}
+            {/* Translate Button */}
+            <TouchableOpacity
+                style={styles.translateButton}
+                onPress={() => setShowTranslateDialog(true)}
+            >
+                <IconButton
+                    icon="translate"
+                    size={20}
+                    iconColor={theme.colors.onSurfaceVariant}
+                    style={{ margin: 0 }}
+                />
+            </TouchableOpacity>
+
+            {/* Translate ActionSheet */}
+            <ActionSheet visible={showTranslateDialog} onClose={() => setShowTranslateDialog(false)} title="Translate Lyrics" scrollable heightPercentage={50}>
+                <View style={{ gap: 4 }}>
+                    {[
+                        { code: 'none', label: 'Off' },
+                        { code: 'en', label: 'English' },
+                        { code: 'es', label: 'Spanish' },
+                        { code: 'fr', label: 'French' },
+                        { code: 'de', label: 'German' },
+                        { code: 'pt', label: 'Portuguese' },
+                        { code: 'it', label: 'Italian' },
+                        { code: 'ja', label: 'Japanese' },
+                        { code: 'ko', label: 'Korean' },
+                        { code: 'rm', label: 'Romanized (Pronunciation)' },
+                    ].map(lang => (
+                        <Button
+                            key={lang.code}
+                            mode={currentTranslationLanguage === lang.code ? "contained-tonal" : "text"}
+                            onPress={() => {
+                                setTranslationLanguage(itemId, lang.code);
+                                setShowTranslateDialog(false);
+                            }}
+                            style={{ marginVertical: 4 }}
+                        >
+                            {lang.label}
+                        </Button>
+                    ))}
+                </View>
+            </ActionSheet>
+
+            {/* Settings Menu */}
+            <ActionSheet visible={showSettingsMenu} onClose={() => setShowSettingsMenu(false)} title="Lyrics Options" heightPercentage={40}>
+                <View style={{ paddingTop: 8 }}>
+                    <List.Item
+                        title="Search Lyrics"
+                        description="Manually find lyrics for this track"
+                        left={props => <List.Icon {...props} icon="magnify" />}
+                        onPress={() => {
+                            setShowSettingsMenu(false);
+                            setSearchQuery(`${currentTrack?.name || ''} ${currentTrack?.artist || ''}`.trim());
+                            setShowSearchDialog(true);
+                        }}
+                    />
+                    <List.Item
+                        title="Adjust Timing"
+                        description="Sync lyrics if they are slightly off"
+                        left={props => <List.Icon {...props} icon="tune-vertical" />}
+                        onPress={() => {
+                            setShowSettingsMenu(false);
+                            handleOpenOffsetDialog();
+                        }}
+                    />
+                </View>
+            </ActionSheet>
+
+            {/* Search Lyrics Dialog */}
+            <ActionSheet visible={showSearchDialog} onClose={() => setShowSearchDialog(false)} title="Search Lyrics" heightPercentage={80} scrollable={false}>
+                <View style={{ flex: 1, paddingBottom: 16 }}>
+                    <TextInput
+                        mode="outlined"
+                        placeholder="Song name and artist..."
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        onSubmitEditing={handleSearchLyrics}
+                        right={<TextInput.Icon icon="magnify" onPress={handleSearchLyrics} />}
+                        style={{ marginBottom: 16 }}
+                    />
+                    {isSearching ? (
+                        <ActivityIndicator style={{ marginTop: 32 }} color={theme.colors.primary} />
+                    ) : (
+                        <FlatList
+                            data={searchResults}
+                            keyExtractor={item => item.id.toString()}
+                            renderItem={({ item }) => (
+                                <List.Item
+                                    title={item.name || item.trackName}
+                                    description={`${item.artistName} • ${item.albumName} \n${Math.floor(item.duration / 60)}:${String(item.duration % 60).padStart(2, '0')}`}
+                                    descriptionNumberOfLines={2}
+                                    right={props => item.syncedLyrics ? <Text {...props} style={{ alignSelf: 'center', color: theme.colors.primary, fontSize: 12 }}>Synced</Text> : null}
+                                    onPress={() => handleSelectSearchResult(item)}
+                                    style={{ marginVertical: 4 }}
+                                />
+                            )}
+                            ListEmptyComponent={
+                                searchQuery ?
+                                    <Text style={{ textAlign: 'center', marginTop: 32, color: theme.colors.onSurfaceVariant }}>No results found.</Text>
+                                    : null
+                            }
                         />
-                        <View style={styles.sliderLabels}>
-                            <Text variant="labelSmall" style={{ color: theme.colors.outline }}>Later (-2s)</Text>
-                            <Text variant="labelSmall" style={{ color: theme.colors.outline }}>Earlier (+2s)</Text>
-                        </View>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setTempOffset(0)}>Reset</Button>
-                        <Button onPress={() => setShowOffsetDialog(false)}>Cancel</Button>
+                    )}
+                </View>
+            </ActionSheet>
+
+            {/* Offset Settings ActionSheet */}
+            <ActionSheet visible={showOffsetDialog} onClose={() => setShowOffsetDialog(false)} title="Lyrics Timing" heightPercentage={45}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">
+                        If the lyrics are out of sync for this specific song, you can adjust the timing here. (+0.5s means lyrics highlight half a second earlier).
+                    </Text>
+
+                    <View style={{ alignItems: 'center' }}>
+                        <Text variant="displaySmall" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>
+                            {tempOffset > 0 ? '+' : ''}{(tempOffset / 1000).toFixed(1)}s
+                        </Text>
+                        <Text variant="labelMedium" style={{ color: theme.colors.outline, marginTop: 4 }}>
+                            Current Offset
+                        </Text>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'center' }}>
+                        <Button
+                            mode="outlined"
+                            onPress={() => setTempOffset(prev => prev - 500)}
+                            icon="minus"
+                        >
+                            0.5s
+                        </Button>
+                        <Button
+                            mode="outlined"
+                            onPress={() => setTempOffset(prev => prev + 500)}
+                            icon="plus"
+                        >
+                            0.5s
+                        </Button>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                        <Button mode="text" onPress={() => setTempOffset(0)}>Reset</Button>
+                        <Button mode="text" onPress={() => setShowOffsetDialog(false)}>Cancel</Button>
                         <Button mode="contained" onPress={handleSaveOffset}>Save</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
+                    </View>
+                </View>
+            </ActionSheet>
         </View>
     );
 }
@@ -295,21 +488,15 @@ const styles = StyleSheet.create({
         height: 40,
         justifyContent: 'center',
         alignItems: 'center',
-        opacity: 0.8,
     },
-    sliderHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 8,
-    },
-    slider: {
-        width: '100%',
+    translateButton: {
+        position: 'absolute',
+        bottom: 16,
+        left: 16,
+        borderRadius: 20,
+        width: 40,
         height: 40,
-    },
-    sliderLabels: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginTop: -4,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 });

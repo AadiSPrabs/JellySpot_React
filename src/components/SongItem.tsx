@@ -1,9 +1,10 @@
 import React, { useRef } from 'react';
-import { View, Image, Animated, Pressable, StyleSheet } from 'react-native';
+import { View, Animated, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Text, IconButton, useTheme, Surface, Checkbox } from 'react-native-paper';
 import { jellyfinApi } from '../api/jellyfin';
 import { EqualizerAnimation } from './EqualizerAnimation';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 
 interface SongItemProps {
     item: any;
@@ -17,6 +18,8 @@ interface SongItemProps {
     isSelectionMode?: boolean;
     isSelected?: boolean;
     showEqualizer?: boolean; // New prop to enable equalizer (for DetailScreen)
+    drag?: () => void;
+    isActive?: boolean;
 }
 
 export const SongItem = React.memo(({
@@ -31,6 +34,8 @@ export const SongItem = React.memo(({
     isSelectionMode = false,
     isSelected = false,
     showEqualizer = false,
+    drag,
+    isActive = false,
 }: SongItemProps) => {
     const theme = useTheme();
     const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -71,13 +76,17 @@ export const SongItem = React.memo(({
                 style={({ pressed }) => [
                     styles.container,
                     {
-                        backgroundColor: isSelected
-                            ? theme.colors.primaryContainer
-                            : (isCurrent && !showEqualizer ? theme.colors.elevation.level5 : 'transparent'),
+                        backgroundColor: isActive
+                            ? theme.colors.elevation.level3
+                            : isSelected
+                                ? theme.colors.primaryContainer
+                                : (isCurrent && !showEqualizer ? theme.colors.elevation.level5 : 'transparent'),
                     },
-                    pressed && !isSelected && { backgroundColor: theme.colors.elevation.level2 }
+                    pressed && !isSelected && !isActive && { backgroundColor: theme.colors.elevation.level2 }
                 ]}
                 android_ripple={{ color: theme.colors.onSurfaceVariant, borderless: false }}
+                accessibilityRole="button"
+                accessibilityLabel={`${trackName} by ${artistName}${isSelected ? ', selected' : ''}${isCurrent ? ', currently playing' : ''}`}
             >
                 <View style={styles.contentRow}>
                     {/* Selection Checkbox */}
@@ -129,13 +138,20 @@ export const SongItem = React.memo(({
                         </Text>
                     </View>
 
-                    {/* Menu Button (Hidden in selection mode) */}
+                    {/* Menu Button or Drag Handle */}
                     {!isSelectionMode && (
-                        <IconButton
-                            icon="dots-vertical"
-                            size={24}
-                            onPress={onMenuPress}
-                        />
+                        drag ? (
+                            <Pressable onPressIn={drag} style={{ padding: 8 }}>
+                                <Icon name="drag" size={24} color={theme.colors.onSurfaceVariant} />
+                            </Pressable>
+                        ) : (
+                            <IconButton
+                                icon="dots-vertical"
+                                size={24}
+                                onPress={onMenuPress}
+                                accessibilityLabel={`Options for ${trackName}`}
+                            />
+                        )
                     )}
                 </View>
             </Pressable>

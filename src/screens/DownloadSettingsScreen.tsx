@@ -8,6 +8,8 @@ import { Directory } from 'expo-file-system';
 import * as Network from 'expo-network';
 import { downloadService } from '../services/DownloadService';
 import ConfirmationDialog, { ConfirmationType } from '../components/ConfirmationDialog';
+import SettingsGroup from '../components/SettingsGroup';
+import SettingsItem from '../components/SettingsItem';
 
 const CONCURRENT_OPTIONS = [
     { label: '1 download at a time', value: 1 },
@@ -121,97 +123,89 @@ export default function DownloadSettingsScreen() {
 
                 <ScrollView contentContainerStyle={styles.content}>
                     {/* Storage Location */}
-                    <List.Section>
-                        <List.Subheader>Download Location</List.Subheader>
-                        <Surface style={[styles.settingCard, { backgroundColor: theme.colors.elevation.level1 }]} elevation={0}>
-                            <List.Item
-                                title="Save Location"
-                                description={getDisplayPath()}
-                                left={props => <List.Icon {...props} icon="folder" />}
-                            />
-                            <View style={styles.buttonRow}>
-                                <Button
-                                    mode="contained"
-                                    onPress={handleBrowseFolder}
-                                    style={{ marginRight: 8 }}
-                                    icon="folder-open"
-                                >
-                                    Browse
-                                </Button>
-                                <Button
-                                    mode="outlined"
-                                    onPress={handleResetPath}
-                                >
-                                    Reset
-                                </Button>
-                            </View>
-                            <Text variant="bodySmall" style={[styles.helpText, { color: theme.colors.onSurfaceVariant }]}>
-                                Select a folder to save downloaded music. Uses Android's Storage Access Framework for full access.
-                            </Text>
-                        </Surface>
-                    </List.Section>
+                    <SettingsGroup title="Download Location">
+                        <SettingsItem
+                            title="Save Location"
+                            description={getDisplayPath()}
+                            icon="folder"
+                        />
+                        <View style={styles.buttonRow}>
+                            <Button
+                                mode="contained"
+                                onPress={handleBrowseFolder}
+                                style={{ marginRight: 8 }}
+                                icon="folder-open"
+                            >
+                                Browse
+                            </Button>
+                            <Button
+                                mode="outlined"
+                                onPress={handleResetPath}
+                            >
+                                Reset
+                            </Button>
+                        </View>
+                        <Text variant="bodySmall" style={[styles.helpText, { color: theme.colors.onSurfaceVariant }]}>
+                            Select a folder to save downloaded music. Uses Android's Storage Access Framework for full access.
+                        </Text>
+                    </SettingsGroup>
 
                     {/* Concurrent Downloads */}
-                    <List.Section>
-                        <List.Subheader>Simultaneous Downloads</List.Subheader>
-                        <Surface style={[styles.settingCard, { backgroundColor: theme.colors.elevation.level1 }]} elevation={0}>
-                            <View style={styles.dropdownContainer}>
-                                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>Max Downloads</Text>
-                                <Menu
-                                    visible={concurrentMenuVisible}
-                                    onDismiss={() => setConcurrentMenuVisible(false)}
-                                    anchor={
-                                        <Button
-                                            mode="outlined"
-                                            onPress={() => setConcurrentMenuVisible(true)}
-                                            icon="chevron-down"
-                                            contentStyle={{ flexDirection: 'row-reverse' }}
-                                        >
-                                            {getConcurrentLabel()}
-                                        </Button>
-                                    }
-                                >
-                                    {CONCURRENT_OPTIONS.map(option => (
-                                        <Menu.Item
-                                            key={option.value}
-                                            onPress={() => {
-                                                setMaxConcurrentDownloads(option.value);
-                                                setConcurrentMenuVisible(false);
-                                            }}
-                                            title={option.label}
-                                            leadingIcon={maxConcurrentDownloads === option.value ? 'check' : undefined}
-                                        />
-                                    ))}
-                                </Menu>
-                            </View>
-                            <Text variant="bodySmall" style={[styles.helpText, { color: theme.colors.onSurfaceVariant }]}>
-                                More simultaneous downloads complete faster but use more bandwidth.
-                            </Text>
-                        </Surface>
-                    </List.Section>
+                    <SettingsGroup title="Simultaneous Downloads">
+                        <View style={styles.dropdownContainer}>
+                            <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>Max Downloads</Text>
+                            <Menu
+                                visible={concurrentMenuVisible}
+                                onDismiss={() => setConcurrentMenuVisible(false)}
+                                anchor={
+                                    <Button
+                                        mode="outlined"
+                                        onPress={() => setConcurrentMenuVisible(true)}
+                                        icon="chevron-down"
+                                        contentStyle={{ flexDirection: 'row-reverse' }}
+                                    >
+                                        {getConcurrentLabel()}
+                                    </Button>
+                                }
+                            >
+                                {CONCURRENT_OPTIONS.map(option => (
+                                    <Menu.Item
+                                        key={option.value}
+                                        onPress={() => {
+                                            setMaxConcurrentDownloads(option.value);
+                                            setConcurrentMenuVisible(false);
+                                        }}
+                                        title={option.label}
+                                        leadingIcon={maxConcurrentDownloads === option.value ? 'check' : undefined}
+                                    />
+                                ))}
+                            </Menu>
+                        </View>
+                        <Text variant="bodySmall" style={[styles.helpText, { color: theme.colors.onSurfaceVariant }]}>
+                            More simultaneous downloads complete faster but use more bandwidth.
+                        </Text>
+                    </SettingsGroup>
 
                     {/* WiFi Only */}
-                    <List.Section>
-                        <List.Subheader>Network</List.Subheader>
-                        <Surface style={[styles.settingCard, { backgroundColor: theme.colors.elevation.level1 }]} elevation={0}>
-                            <List.Item
-                                title="Download on WiFi only"
-                                description={wifiOnlyDownloads ? 'Downloads will wait for WiFi' : 'Downloads use any network'}
-                                left={props => <List.Icon {...props} icon="wifi" />}
-                                right={() => (
-                                    <Switch
-                                        value={wifiOnlyDownloads}
-                                        onValueChange={setWifiOnlyDownloads}
-                                    />
-                                )}
-                            />
-                            {wifiOnlyDownloads && !isConnectedWifi && (
-                                <Text variant="bodySmall" style={[styles.helpText, { color: theme.colors.error }]}>
-                                    ⚠️ Not connected to WiFi - downloads will wait
-                                </Text>
+                    <SettingsGroup title="Network">
+                        <SettingsItem
+                            title="Download on WiFi only"
+                            description={wifiOnlyDownloads ? 'Downloads will wait for WiFi' : 'Downloads use any network'}
+                            icon="wifi"
+                            onPress={() => setWifiOnlyDownloads(!wifiOnlyDownloads)}
+                            right={() => (
+                                <Switch
+                                    value={wifiOnlyDownloads}
+                                    onValueChange={setWifiOnlyDownloads}
+                                />
                             )}
-                        </Surface>
-                    </List.Section>
+                        />
+                        {wifiOnlyDownloads && !isConnectedWifi && (
+                            <Text variant="bodySmall" style={[styles.helpText, { color: theme.colors.error, marginTop: -4 }]}>
+                                ⚠️ Not connected to WiFi - downloads will wait
+                            </Text>
+                        )}
+                    </SettingsGroup>
                 </ScrollView>
             </SafeAreaView>
 
@@ -241,12 +235,7 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
     },
     content: {
-        padding: 16,
-    },
-    settingCard: {
-        borderRadius: 12,
-        overflow: 'hidden',
-        marginBottom: 8,
+        paddingVertical: 16,
     },
     buttonRow: {
         flexDirection: 'row',

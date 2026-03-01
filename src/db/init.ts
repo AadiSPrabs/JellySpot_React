@@ -60,7 +60,23 @@ export const initializeDatabase = () => {
                     played_at INTEGER NOT NULL,
                     play_duration_ms INTEGER,
                     completed_play INTEGER DEFAULT 0,
-                    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                    source TEXT DEFAULT 'local' NOT NULL
+                );
+            `);
+
+            // Migration: Add source column for existing installs
+            try {
+                db.execSync("ALTER TABLE play_history ADD COLUMN source TEXT DEFAULT 'local' NOT NULL;");
+            } catch (e) {
+                // Ignore if exists
+            }
+
+            // Migration: Create cached_tracks table for Jellyfin play history
+            db.execSync(`
+                CREATE TABLE IF NOT EXISTS cached_tracks (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    track_data_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
                 );
             `);
 
@@ -121,11 +137,41 @@ export const initializeDatabase = () => {
             } catch (e) { /* Column may already exist */ }
 
 
+
         } catch (e) {
             console.error('Failed to create downloads table:', e);
         }
 
+        // Migration: Create cached_translations table
+        try {
+            db.execSync(`
+                DROP TABLE IF EXISTS cached_translations;
+                CREATE TABLE IF NOT EXISTS cached_translations (
+                    track_id TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    translated_lyrics_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (track_id, language)
+                );
+            `);
+        } catch (e) {
+            console.error("Migration error (cached_translations):", e);
+        }
 
+        // Migration: Create offline_lyrics table
+        try {
+            db.execSync(`
+                CREATE TABLE IF NOT EXISTS offline_lyrics (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    lyrics TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+            `);
+        } catch (e) {
+            console.error("Migration error (offline_lyrics):", e);
+        }
+
+        return true;
     } catch (error) {
         console.error('Failed to initialize database:', error);
     }

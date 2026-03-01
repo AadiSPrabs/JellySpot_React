@@ -232,49 +232,7 @@ class AudioService {
         }
     }
 
-    // Volume control for crossfade
-    async setVolume(volume: number) {
-        await this.setup();
-        // Clamp volume between 0 and 1
-        const clampedVolume = Math.max(0, Math.min(1, volume));
-        await TrackPlayer.setVolume(clampedVolume);
-    }
 
-    async getVolume(): Promise<number> {
-        await this.setup();
-        return await TrackPlayer.getVolume();
-    }
-
-    // Fade out current track over specified duration (ms)
-    async fadeOut(durationMs: number): Promise<void> {
-        const steps = 20; // Number of volume steps
-        const stepDuration = durationMs / steps;
-        const volumeStep = 1 / steps;
-
-        let currentVolume = 1;
-        for (let i = 0; i < steps; i++) {
-            currentVolume -= volumeStep;
-            await this.setVolume(Math.max(0, currentVolume));
-            await new Promise(resolve => setTimeout(resolve, stepDuration));
-        }
-        await this.setVolume(0);
-    }
-
-    // Fade in current track over specified duration (ms)
-    async fadeIn(durationMs: number): Promise<void> {
-        const steps = 20; // Number of volume steps
-        const stepDuration = durationMs / steps;
-        const volumeStep = 1 / steps;
-
-        let currentVolume = 0;
-        await this.setVolume(0); // Start at 0
-        for (let i = 0; i < steps; i++) {
-            currentVolume += volumeStep;
-            await this.setVolume(Math.min(1, currentVolume));
-            await new Promise(resolve => setTimeout(resolve, stepDuration));
-        }
-        await this.setVolume(1);
-    }
 
     // Playback speed control (0.5 to 2.0)
     async setPlaybackRate(rate: number): Promise<void> {

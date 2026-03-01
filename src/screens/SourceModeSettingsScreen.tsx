@@ -7,6 +7,7 @@ import { useSettingsStore, SourceMode } from '../store/settingsStore';
 import { useAuthStore } from '../store/authStore';
 import { jellyfinApi } from '../api/jellyfin';
 import { Server, Smartphone, Check, AlertCircle, Library } from 'lucide-react-native';
+import SettingsGroup from '../components/SettingsGroup';
 
 interface MusicLibrary {
     Id: string;
@@ -308,239 +309,231 @@ export default function SourceModeSettingsScreen() {
                 </Text>
 
                 {/* Jellyfin Card */}
-                <Surface
-                    style={[
-                        styles.card,
-                        { backgroundColor: theme.colors.elevation.level2, minHeight: 420 }
-                    ]}
-                    elevation={jellyfinEnabled ? 3 : 1}
-                >
-                    <View style={styles.cardHeader}>
-                        <View style={[styles.iconContainer, { backgroundColor: theme.colors.surfaceVariant }]}>
-                            <Server size={24} color={theme.colors.onSurfaceVariant} />
-                        </View>
-                        <View style={styles.textContainer}>
-                            <Text variant="titleMedium" style={{ fontWeight: '600', color: theme.colors.onSurface }}>
-                                Jellyfin Server
-                            </Text>
-                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                Stream from your media server
-                            </Text>
-                        </View>
-                        <Switch value={jellyfinEnabled} onValueChange={handleJellyfinToggle} />
-                    </View>
-
-                    {/* Expanded config - always rendered but hidden when disabled */}
-                    <View
-                        style={[
-                            styles.expandedContent,
-                            !jellyfinEnabled && { opacity: 0 }
-                        ]}
-                        pointerEvents={jellyfinEnabled ? 'auto' : 'none'}
-                    >
-                        {isAuthenticated ? (
-                            // Already logged in
-                            <View style={styles.loggedInContainer}>
-                                <View style={styles.connectedBadge}>
-                                    <Check size={16} color={theme.colors.primary} />
-                                    <Text variant="bodyMedium" style={{ color: theme.colors.primary, marginLeft: 8 }}>
-                                        Connected as {user?.name}
-                                    </Text>
-                                </View>
-                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
-                                    Server: {serverUrl}
+                <SettingsGroup>
+                    <View style={{ padding: 16 }}>
+                        <View style={styles.cardHeader}>
+                            <View style={[styles.iconContainer, { backgroundColor: theme.colors.surfaceVariant }]}>
+                                <Server size={24} color={theme.colors.onSurfaceVariant} />
+                            </View>
+                            <View style={styles.textContainer}>
+                                <Text variant="titleMedium" style={{ fontWeight: '600', color: theme.colors.onSurface }}>
+                                    Jellyfin Server
                                 </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Stream from your media server
+                                </Text>
+                            </View>
+                            <Switch value={jellyfinEnabled} onValueChange={handleJellyfinToggle} />
+                        </View>
 
-                                {/* Music Library Selection */}
-                                {loadingLibraries ? (
-                                    <View style={styles.libraryLoadingContainer}>
-                                        <ActivityIndicator size="small" />
-                                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginLeft: 8 }}>
-                                            Loading libraries...
+                        {/* Expanded config - always rendered but hidden when disabled */}
+                        <View
+                            style={[
+                                styles.expandedContent,
+                                !jellyfinEnabled && { opacity: 0 }
+                            ]}
+                            pointerEvents={jellyfinEnabled ? 'auto' : 'none'}
+                        >
+                            {isAuthenticated ? (
+                                // Already logged in
+                                <View style={styles.loggedInContainer}>
+                                    <View style={styles.connectedBadge}>
+                                        <Check size={16} color={theme.colors.primary} />
+                                        <Text variant="bodyMedium" style={{ color: theme.colors.primary, marginLeft: 8 }}>
+                                            Connected as {user?.name}
                                         </Text>
                                     </View>
-                                ) : musicLibraries.length > 0 ? (
-                                    <View style={styles.librarySection}>
-                                        <View style={styles.librarySectionHeader}>
-                                            <Library size={18} color={theme.colors.onSurfaceVariant} />
-                                            <Text variant="labelLarge" style={{ color: theme.colors.onSurface, marginLeft: 8, flex: 1 }}>
-                                                Music Libraries
+                                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+                                        Server: {serverUrl}
+                                    </Text>
+
+                                    {/* Music Library Selection */}
+                                    {loadingLibraries ? (
+                                        <View style={styles.libraryLoadingContainer}>
+                                            <ActivityIndicator size="small" />
+                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginLeft: 8 }}>
+                                                Loading libraries...
                                             </Text>
-                                            <TouchableOpacity onPress={handleSelectAllLibraries}>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.primary }}>
-                                                    {selectedLibs.size === musicLibraries.length ? 'Deselect All' : 'Select All'}
-                                                </Text>
-                                            </TouchableOpacity>
                                         </View>
-                                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                            {selectedLibs.size === 0
-                                                ? 'All libraries are included (none selected = all)'
-                                                : `${selectedLibs.size} of ${musicLibraries.length} selected`}
-                                        </Text>
-                                        {musicLibraries.map((library) => {
-                                            const isSelected = selectedLibs.has(library.Id);
-                                            return (
-                                                <TouchableOpacity
-                                                    key={library.Id}
-                                                    style={[
-                                                        styles.libraryItem,
-                                                        {
-                                                            backgroundColor: isSelected
-                                                                ? theme.colors.primaryContainer
-                                                                : 'transparent',
-                                                        }
-                                                    ]}
-                                                    onPress={() => handleLibraryToggle(library.Id)}
-                                                >
-                                                    <Checkbox
-                                                        status={isSelected ? 'checked' : 'unchecked'}
-                                                        onPress={() => handleLibraryToggle(library.Id)}
-                                                    />
-                                                    <Text
-                                                        variant="bodyMedium"
-                                                        style={{
-                                                            color: isSelected ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
-                                                            flex: 1,
-                                                            fontWeight: isSelected ? '600' : '400',
-                                                        }}
-                                                    >
-                                                        {library.Name}
+                                    ) : musicLibraries.length > 0 ? (
+                                        <View style={styles.librarySection}>
+                                            <View style={styles.librarySectionHeader}>
+                                                <Library size={18} color={theme.colors.onSurfaceVariant} />
+                                                <Text variant="labelLarge" style={{ color: theme.colors.onSurface, marginLeft: 8, flex: 1 }}>
+                                                    Music Libraries
+                                                </Text>
+                                                <TouchableOpacity onPress={handleSelectAllLibraries}>
+                                                    <Text variant="labelSmall" style={{ color: theme.colors.primary }}>
+                                                        {selectedLibs.size === musicLibraries.length ? 'Deselect All' : 'Select All'}
                                                     </Text>
                                                 </TouchableOpacity>
-                                            );
-                                        })}
+                                            </View>
+                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
+                                                {selectedLibs.size === 0
+                                                    ? 'All libraries are included (none selected = all)'
+                                                    : `${selectedLibs.size} of ${musicLibraries.length} selected`}
+                                            </Text>
+                                            {musicLibraries.map((library) => {
+                                                const isSelected = selectedLibs.has(library.Id);
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={library.Id}
+                                                        style={[
+                                                            styles.libraryItem,
+                                                            {
+                                                                backgroundColor: isSelected
+                                                                    ? theme.colors.primaryContainer
+                                                                    : 'transparent',
+                                                            }
+                                                        ]}
+                                                        onPress={() => handleLibraryToggle(library.Id)}
+                                                    >
+                                                        <Checkbox
+                                                            status={isSelected ? 'checked' : 'unchecked'}
+                                                            onPress={() => handleLibraryToggle(library.Id)}
+                                                        />
+                                                        <Text
+                                                            variant="bodyMedium"
+                                                            style={{
+                                                                color: isSelected ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                                                                flex: 1,
+                                                                fontWeight: isSelected ? '600' : '400',
+                                                            }}
+                                                        >
+                                                            {library.Name}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </View>
+                                    ) : (
+                                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+                                            No music libraries found on this server.
+                                        </Text>
+                                    )}
+
+                                    <Button mode="outlined" onPress={handleDisconnect} textColor={theme.colors.error}>
+                                        Disconnect
+                                    </Button>
+                                </View>
+                            ) : !serverConnected ? (
+                                // Step 1: Enter server URL
+                                <View>
+                                    <TextInput
+                                        label="Server URL"
+                                        value={serverUrlInput}
+                                        onChangeText={setServerUrlInput}
+                                        mode="outlined"
+                                        placeholder="e.g. 192.168.1.5:8096"
+                                        autoCapitalize="none"
+                                        keyboardType="url"
+                                        style={styles.input}
+                                        error={!!error}
+                                    />
+                                    {error ? <Text style={{ color: theme.colors.error, marginBottom: 8 }}>{error}</Text> : null}
+                                    <Button
+                                        mode="contained"
+                                        onPress={handleConnectServer}
+                                        loading={connecting}
+                                        disabled={connecting || !serverUrlInput}
+                                    >
+                                        Connect
+                                    </Button>
+
+                                </View>
+                            ) : (
+                                // Step 2: Login
+                                <View>
+                                    <View style={styles.connectedBadge}>
+                                        <Check size={16} color={theme.colors.primary} />
+                                        <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 8 }}>
+                                            Server connected
+                                        </Text>
                                     </View>
-                                ) : (
-                                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
-                                        No music libraries found on this server.
-                                    </Text>
-                                )}
+                                    <TextInput
+                                        label="Username"
+                                        value={username}
+                                        onChangeText={setUsername}
+                                        mode="outlined"
+                                        autoCapitalize="none"
+                                        style={styles.input}
+                                    />
+                                    <TextInput
+                                        label="Password"
+                                        value={password}
+                                        onChangeText={setPassword}
+                                        mode="outlined"
+                                        secureTextEntry={!showPassword}
+                                        style={styles.input}
+                                        right={
+                                            <TextInput.Icon
+                                                icon={showPassword ? "eye-off" : "eye"}
+                                                onPress={() => setShowPassword(!showPassword)}
+                                            />
+                                        }
+                                    />
+                                    {error ? <Text style={{ color: theme.colors.error, marginBottom: 8 }}>{error}</Text> : null}
+                                    <Button
+                                        mode="contained"
+                                        onPress={handleLogin}
+                                        loading={loggingIn}
+                                        disabled={loggingIn || !username}
+                                    >
+                                        Log In
+                                    </Button>
+                                    <Button
+                                        mode="outlined"
+                                        onPress={handleStartQuickConnect}
+                                        style={{ marginTop: 8 }}
+                                    >
+                                        Quick Connect
+                                    </Button>
+                                    <Button
+                                        mode="text"
+                                        onPress={() => { setServerConnected(false); setError(''); }}
+                                        style={{ marginTop: 8 }}
+                                    >
+                                        Change Server
+                                    </Button>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+                </SettingsGroup>
 
-                                <Button mode="outlined" onPress={handleDisconnect} textColor={theme.colors.error}>
-                                    Disconnect
-                                </Button>
+                {/* Local Music Card */}
+                <SettingsGroup>
+                    <View style={{ padding: 16 }}>
+                        <View style={styles.cardHeader}>
+                            <View style={[styles.iconContainer, { backgroundColor: theme.colors.surfaceVariant }]}>
+                                <Smartphone size={24} color={theme.colors.onSurfaceVariant} />
                             </View>
-                        ) : !serverConnected ? (
-                            // Step 1: Enter server URL
-                            <View>
-                                <TextInput
-                                    label="Server URL"
-                                    value={serverUrlInput}
-                                    onChangeText={setServerUrlInput}
-                                    mode="outlined"
-                                    placeholder="e.g. 192.168.1.5:8096"
-                                    autoCapitalize="none"
-                                    keyboardType="url"
-                                    style={styles.input}
-                                    error={!!error}
-                                />
-                                {error ? <Text style={{ color: theme.colors.error, marginBottom: 8 }}>{error}</Text> : null}
-                                <Button
-                                    mode="contained"
-                                    onPress={handleConnectServer}
-                                    loading={connecting}
-                                    disabled={connecting || !serverUrlInput}
-                                >
-                                    Connect
-                                </Button>
+                            <View style={styles.textContainer}>
+                                <Text variant="titleMedium" style={{ fontWeight: '600', color: theme.colors.onSurface }}>
+                                    Local Music
+                                </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Play music from your device
+                                </Text>
+                            </View>
+                            <Switch value={localEnabled} onValueChange={handleLocalToggle} />
+                        </View>
 
-                            </View>
-                        ) : (
-                            // Step 2: Login
-                            <View>
+                        {localEnabled && (
+                            <View style={styles.expandedContent}>
                                 <View style={styles.connectedBadge}>
                                     <Check size={16} color={theme.colors.primary} />
                                     <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 8 }}>
-                                        Server connected
+                                        Ready to use
                                     </Text>
                                 </View>
-                                <TextInput
-                                    label="Username"
-                                    value={username}
-                                    onChangeText={setUsername}
-                                    mode="outlined"
-                                    autoCapitalize="none"
-                                    style={styles.input}
-                                />
-                                <TextInput
-                                    label="Password"
-                                    value={password}
-                                    onChangeText={setPassword}
-                                    mode="outlined"
-                                    secureTextEntry={!showPassword}
-                                    style={styles.input}
-                                    right={
-                                        <TextInput.Icon
-                                            icon={showPassword ? "eye-off" : "eye"}
-                                            onPress={() => setShowPassword(!showPassword)}
-                                        />
-                                    }
-                                />
-                                {error ? <Text style={{ color: theme.colors.error, marginBottom: 8 }}>{error}</Text> : null}
-                                <Button
-                                    mode="contained"
-                                    onPress={handleLogin}
-                                    loading={loggingIn}
-                                    disabled={loggingIn || !username}
-                                >
-                                    Log In
-                                </Button>
-                                <Button
-                                    mode="outlined"
-                                    onPress={handleStartQuickConnect}
-                                    style={{ marginTop: 8 }}
-                                >
-                                    Quick Connect
-                                </Button>
-                                <Button
-                                    mode="text"
-                                    onPress={() => { setServerConnected(false); setError(''); }}
-                                    style={{ marginTop: 8 }}
-                                >
-                                    Change Server
-                                </Button>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Music will be scanned from your device storage.
+                                </Text>
                             </View>
                         )}
                     </View>
-                </Surface>
-
-                {/* Local Music Card */}
-                <Surface
-                    style={[
-                        styles.card,
-                        { backgroundColor: theme.colors.elevation.level2 }
-                    ]}
-                    elevation={localEnabled ? 3 : 1}
-                >
-                    <View style={styles.cardHeader}>
-                        <View style={[styles.iconContainer, { backgroundColor: theme.colors.surfaceVariant }]}>
-                            <Smartphone size={24} color={theme.colors.onSurfaceVariant} />
-                        </View>
-                        <View style={styles.textContainer}>
-                            <Text variant="titleMedium" style={{ fontWeight: '600', color: theme.colors.onSurface }}>
-                                Local Music
-                            </Text>
-                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                Play music from your device
-                            </Text>
-                        </View>
-                        <Switch value={localEnabled} onValueChange={handleLocalToggle} />
-                    </View>
-
-                    {localEnabled && (
-                        <View style={styles.expandedContent}>
-                            <View style={styles.connectedBadge}>
-                                <Check size={16} color={theme.colors.primary} />
-                                <Text variant="bodySmall" style={{ color: theme.colors.primary, marginLeft: 8 }}>
-                                    Ready to use
-                                </Text>
-                            </View>
-                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                Music will be scanned from your device storage.
-                            </Text>
-                        </View>
-                    )}
-                </Surface>
+                </SettingsGroup>
 
                 {/* Hint for both */}
                 {jellyfinEnabled && localEnabled && (
@@ -619,13 +612,8 @@ const styles = StyleSheet.create({
         minHeight: 56,
     },
     scrollContent: {
-        padding: 16,
+        paddingVertical: 16,
         paddingBottom: 120,
-    },
-    card: {
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: 16,
     },
     cardHeader: {
         flexDirection: 'row',

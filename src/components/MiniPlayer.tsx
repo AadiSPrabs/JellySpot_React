@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useLayoutEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, PanResponder, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Animated, Dimensions, useWindowDimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Image } from 'expo-image';
 import { usePlayerStore } from '../store/playerStore';
 import { jellyfinApi } from '../api/jellyfin';
 import { useNavigation } from '@react-navigation/native';
@@ -10,6 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Play, Pause, Music } from 'lucide-react-native';
 import { MiniProgressBar } from './MiniProgressBar';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
+import { runOnJS } from 'react-native-reanimated';
+import { audioService } from '../services/AudioService';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -17,9 +21,10 @@ import { useShallow } from 'zustand/react/shallow';
 
 interface MiniPlayerProps {
     isPlayerVisible?: boolean;
+    isGlobal?: boolean;
 }
 
-export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
+export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProps) {
     const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, reset, queue, repeatMode } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
@@ -39,8 +44,6 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
     const [isVisible, setIsVisible] = useState(!!currentTrack);
     const [imageError, setImageError] = useState(false);
     const lastTrack = useRef(currentTrack);
-    // Don't update lastTrack here - it breaks the animation detection
-    // lastTrack is updated only: 1) after animation completes, 2) when track becomes null
     const trackToRender = currentTrack || lastTrack.current;
 
     // Use a ref for Animated Value - Start off-screen (200)
@@ -53,17 +56,34 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
 
     // Bottom offset calculation - no bottom tab bar in landscape
     const tabBarHeight = isLandscape ? 0 : 90;
-    const bottomOffset = tabBarHeight + 12;
+    // When rendered inside GlobalPlayer, the wrapper handles vertical positioning so we don't need a bottom offset
+    const bottomOffset = isGlobal ? 0 : (tabBarHeight + 6);
 
     // Left offset calculation - account for left tab bar in landscape
     const leftOffset = isLandscape ? LEFT_BAR_WIDTH + 12 : 12;
 
     useEffect(() => {
-        setIsVisible(!!currentTrack);
-        setImageError(false); // Reset image error when track changes
+        // Only make visible if there's a track
+        if (currentTrack) {
+            setIsVisible(true);
+            setImageError(false); // Reset image error when track changes
+        } else {
+            // When track is cleared (player stopped), animate out first
+            Animated.timing(translateY, {
+                toValue: 200, // Slide down
+                duration: 300,
+                useNativeDriver: true,
+            }).start(() => {
+                // Once animation finishes, actually hide the component
+                setIsVisible(false);
+                lastTrack.current = null;
+            });
+        }
     }, [currentTrack]);
 
     useEffect(() => {
+        if (!currentTrack) return; // Allow the other useEffect to handle disappearance
+
         const targetY = (isVisible && !isPlayerVisible) ? 0 : 200;
 
         Animated.spring(translateY, {
@@ -120,38 +140,28 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
         }
     }, [currentTrack]);
 
-    // Gesture Handling - Use useMemo with dependencies to avoid stale closures
-    const panResponder = useMemo(
-        () => PanResponder.create({
-            onStartShouldSetPanResponder: () => false, // Let touches pass through initially (for click)
-            onMoveShouldSetPanResponder: (_: any, gestureState: any) => {
-                // Capture if swipe is significant
-                const { dx, dy } = gestureState;
-                // Use a lower threshold (10) to catch swipes early
-                return Math.abs(dx) > 10 || Math.abs(dy) > 10;
-            },
-            onPanResponderTerminationRequest: () => false, // Don't let others (ScrollView etc) steal it
-            onPanResponderRelease: (_: any, gestureState: any) => {
-                const { dx, dy } = gestureState;
+    // Gesture Handling - Using RNGH to play nicely with GlobalPlayer's gestures
+    const panGesture = useMemo(() => {
+        return Gesture.Pan()
+            // Allow horizontal tracking (swipe left/right) and downward tracking (swipe down).
+            // Prevent upward tracking so we don't block the GlobalPlayer's drag-to-expand.
+            .activeOffsetX([-20, 20])
+            .activeOffsetY(20)
+            .onEnd((event) => {
+                const { translationX, translationY } = event;
 
-                // Swipe Down (Close & Stop)
-                if (dy > 30) {
-                    reset(); // Stop audio and clear track (closes player)
-                    return;
-                }
-
-                // Swipe Up (Open full player)
-                if (dy < -30) {
-                    navigation.navigate('Player');
+                // Vertical Swipe Down to Stop & Dismiss
+                if (translationY > 40 && Math.abs(translationY) > Math.abs(translationX)) {
+                    runOnJS(audioService.stop)();
                     return;
                 }
 
                 // Horizontal Swipes
-                if (Math.abs(dx) > 30) {
+                if (Math.abs(translationX) > 30) {
                     const currentIndex = queue.findIndex(t => t.id === trackToRender?.id);
 
-                    if (dx > 0) {
-                        // Drag Left -> Right (Swipe Right) -> Previous
+                    if (translationX > 0) {
+                        // Swipe Right -> Previous
                         if (currentIndex > 0 || repeatMode === 'one' || (repeatMode === 'all' && queue.length === 1)) {
                             transitionDirection.current = 'right';
                             Animated.parallel([
@@ -168,16 +178,7 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
                             ]).start(async () => {
                                 await playPrevious();
 
-                                // Restore text if track won't change (Repeat One or Single Track Loop)
                                 if (repeatMode === 'one' || (repeatMode === 'all' && queue.length === 1)) {
-                                    // Reset position to LEFT (since we swiped right, we want it to come from left? Or standard next/prev logic?)
-                                    // Usually Prev comes from Left. Next comes from Right.
-                                    // Above we moved TO 50 (Right).
-                                    // So we should appear from -50 (Left)?
-                                    // The effect does: reset to 50 (Right) then slide to 0. But that's hardcoded for Next?
-                                    // Wait, the effect sets transitionDirection='right' but code effectively assumes Next.
-
-                                    // For PREV: Slide OUT to Right (50). Slide IN from Left (-50).
                                     textTranslateX.setValue(-50);
                                     Animated.parallel([
                                         Animated.spring(textTranslateX, { toValue: 0, useNativeDriver: true }),
@@ -187,7 +188,7 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
                             });
                         }
                     } else {
-                        // Drag Right -> Left (Swipe Left) -> Next
+                        // Swipe Left -> Next
                         if (currentIndex < queue.length - 1 || repeatMode === 'one' || repeatMode === 'all') {
                             transitionDirection.current = 'left';
                             Animated.parallel([
@@ -204,9 +205,7 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
                             ]).start(async () => {
                                 await playNext();
 
-                                // Restore text if track won't change
                                 if (repeatMode === 'one' || (repeatMode === 'all' && queue.length === 1)) {
-                                    // For NEXT: Slide OUT to Left (-50). Slide IN from Right (50).
                                     textTranslateX.setValue(50);
                                     Animated.parallel([
                                         Animated.spring(textTranslateX, { toValue: 0, useNativeDriver: true }),
@@ -217,14 +216,18 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
                         }
                     }
                 }
-            },
-        }),
-        [queue, trackToRender, reset, playNext, playPrevious, navigation, textTranslateX, textOpacity, repeatMode]
-    );
+            })
+            .runOnJS(true); // Needed because we use standard Animated instead of Reanimated here
+    }, [queue, trackToRender, playNext, playPrevious, repeatMode, textTranslateX, textOpacity]);
 
     if (!isVisible || !trackToRender) return null;
 
     const handlePress = () => {
+        if (isGlobal) {
+            usePlayerStore.getState().setPlayerExpanded(true);
+            return;
+        }
+
         // Slide down FAST
         Animated.timing(translateY, {
             toValue: 200,
@@ -245,47 +248,60 @@ export default function MiniPlayer({ isPlayerVisible }: MiniPlayerProps) {
     };
 
     return (
-        <Animated.View
-            style={[
-                styles.container,
-                animatedStyle,
-                {
-                    backgroundColor: theme.colors.elevation.level2,
-                    elevation: 4,
-                    left: leftOffset,
-                }
-            ]}
-            {...panResponder.panHandlers}
-        >
-            <TouchableOpacity style={styles.touchable} onPress={handlePress} activeOpacity={0.9}>
-                <MiniProgressBar />
-                <View style={styles.content}>
-                    {trackToRender.imageUrl && !imageError ? (
-                        <Image
-                            source={{ uri: trackToRender.imageUrl }}
-                            style={styles.image}
-                            onError={() => setImageError(true)}
-                        />
-                    ) : (
-                        <View style={[styles.image, { justifyContent: 'center', alignItems: 'center' }]}>
-                            <Music size={24} color={theme.colors.onSurfaceVariant} />
-                        </View>
-                    )}
-                    <Animated.View style={[styles.textContainer, { transform: [{ translateX: textTranslateX }], opacity: textOpacity }]}>
-                        <Text variant="titleSmall" numberOfLines={1} style={styles.titleText}>{trackToRender.name}</Text>
-                        <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{trackToRender.artist}</Text>
-                    </Animated.View>
-
-                    <TouchableOpacity onPress={togglePlayPause} style={styles.playButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                        {isPlaying ? (
-                            <Pause size={24} color={theme.colors.onSurface} fill={theme.colors.onSurface} />
+        <GestureDetector gesture={panGesture}>
+            <Animated.View
+                style={[
+                    styles.container,
+                    animatedStyle,
+                    {
+                        backgroundColor: theme.colors.elevation.level2,
+                        elevation: 4,
+                        left: leftOffset,
+                    }
+                ]}
+            >
+                <TouchableOpacity
+                    style={styles.touchable}
+                    onPress={handlePress}
+                    activeOpacity={0.9}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Now playing ${trackToRender.name} by ${trackToRender.artist}. Double tap to open player.`}
+                >
+                    <MiniProgressBar />
+                    <View style={styles.content}>
+                        {trackToRender.imageUrl && !imageError ? (
+                            <Image
+                                source={{ uri: trackToRender.imageUrl }}
+                                style={styles.image}
+                                onError={() => setImageError(true)}
+                            />
                         ) : (
-                            <Play size={24} color={theme.colors.onSurface} fill={theme.colors.onSurface} style={{ marginLeft: 2 }} />
+                            <View style={[styles.image, { justifyContent: 'center', alignItems: 'center' }]}>
+                                <Music size={24} color={theme.colors.onSurfaceVariant} />
+                            </View>
                         )}
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        </Animated.View>
+                        <Animated.View style={[styles.textContainer, { transform: [{ translateX: textTranslateX }], opacity: textOpacity }]}>
+                            <Text variant="titleSmall" numberOfLines={1} style={styles.titleText}>{trackToRender.name}</Text>
+                            <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{trackToRender.artist}</Text>
+                        </Animated.View>
+
+                        <TouchableOpacity
+                            onPress={togglePlayPause}
+                            style={styles.playButton}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityRole="button"
+                            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+                        >
+                            {isPlaying ? (
+                                <Pause size={24} color={theme.colors.onSurface} fill={theme.colors.onSurface} />
+                            ) : (
+                                <Play size={24} color={theme.colors.onSurface} fill={theme.colors.onSurface} style={{ marginLeft: 2 }} />
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
+            </Animated.View>
+        </GestureDetector>
     );
 }
 
@@ -311,23 +327,22 @@ const styles = StyleSheet.create({
     content: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        flex: 1,
     },
     image: {
         width: 48,
         height: 48,
         borderRadius: 8,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        margin: 8,
+        backgroundColor: 'rgba(0,0,0,0.1)',
     },
     textContainer: {
         flex: 1,
-        marginLeft: 12,
-        marginRight: 16,
         justifyContent: 'center',
+        paddingRight: 8,
     },
     titleText: {
-        fontWeight: 'bold',
+        fontWeight: '600',
         marginBottom: 2,
     },
     progressBarBackground: {
@@ -342,6 +357,10 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     playButton: {
-        margin: 0,
+        width: 48,
+        height: 48,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingRight: 4,
     }
 });

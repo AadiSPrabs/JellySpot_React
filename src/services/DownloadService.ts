@@ -357,9 +357,7 @@ class DownloadService {
             await Notifications.setNotificationChannelAsync(NOTIFICATION_ID, {
                 name: 'Download Progress',
                 importance: Notifications.AndroidImportance.LOW, // Low importance = no sound/vibration
-                vibrationPattern: null,
                 enableVibrate: false,
-                playSound: false,
                 lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
             });
         }
@@ -397,11 +395,11 @@ class DownloadService {
                     data: { type: 'download-progress' },
                     sticky: true,
                     color: '#2b2d42',
-                    channelId: NOTIFICATION_ID,
                     priority: Notifications.AndroidNotificationPriority.LOW,
-                    vibrate: null,
                 },
-                trigger: null,
+                trigger: {
+                    channelId: NOTIFICATION_ID,
+                },
             });
         } catch (e) {
 

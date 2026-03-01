@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { View, StyleSheet, FlatList, RefreshControl, ScrollView, Animated, TouchableOpacity, Image, Alert, Pressable, useWindowDimensions, LayoutAnimation, Platform, UIManager, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, FlatList, RefreshControl, ScrollView, Animated, TouchableOpacity, Alert, Pressable, useWindowDimensions, LayoutAnimation, Platform, UIManager, ActivityIndicator } from 'react-native';
+import { Image } from 'expo-image';
 import { Text, Card, Avatar, useTheme, IconButton, Button, Surface, Portal, Dialog, TextInput, List } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { usePlayerStore } from '../store/playerStore';
 import { jellyfinApi } from '../api/jellyfin';
@@ -10,7 +11,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { HomeStackParamList } from '../types/navigation';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
-import { Loader } from '../components/Loader';
+import { EmptyState } from '../components/EmptyState';
+import { HomeScreenSkeleton } from '../components/Skeleton';
 import { SourceSwitcher } from '../components/SourceSwitcher';
 import { SongItem } from '../components/SongItem';
 import { useSettingsStore } from '../store/settingsStore';
@@ -20,38 +22,11 @@ import { downloadService } from '../services/DownloadService';
 import * as ImagePicker from 'expo-image-picker';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
 import { dialogStyles } from '../utils/dialogStyles';
+import ActionSheet from '../components/ActionSheet';
 
 import { useShallow } from 'zustand/react/shallow';
+import { MediaItem } from '../types/track';
 
-interface MediaItem {
-    Id: string;
-    Name: string;
-    Type: string;
-    AlbumArtist?: string;
-    Artists?: string[];
-    Album?: string;
-    ImageBlurHashes?: { Primary?: { [key: string]: string } };
-    RunTimeTicks?: number;
-    UserData?: { IsFavorite: boolean };
-    ArtistItems?: { Id: string }[];
-    MediaSources?: {
-        Bitrate?: number;
-        Container?: string;
-        Codec?: string;
-        MediaStreams?: {
-            Type: string;
-            Codec: string;
-        }[];
-    }[];
-    // For local files
-    streamUrl?: string;
-    imageUrl?: string;
-    // Technical details (for local tracks - enriched from library)
-    bitrate?: number;
-    codec?: string;
-    container?: string;
-    lyrics?: string;
-}
 
 // Get greeting based on time of day
 const getGreeting = (): string => {
@@ -126,7 +101,7 @@ const ImageWithFallback = ({
     if (!uri || hasError) {
         return (
             <View style={[style, { backgroundColor, justifyContent: 'center', alignItems: 'center', borderRadius, overflow: 'hidden' }]}>
-                <Icon name={fallbackIcon} size={iconSize} color={iconColor} />
+                <Icon name={fallbackIcon as any} size={iconSize} color={iconColor} />
             </View>
         );
     }
@@ -141,15 +116,15 @@ const ImageWithFallback = ({
             />
             {isLoading && (
                 <View style={[style, { backgroundColor, justifyContent: 'center', alignItems: 'center', position: 'absolute', borderRadius }]}>
-                    <Icon name={fallbackIcon} size={iconSize} color={iconColor} />
+                    <Icon name={fallbackIcon as any} size={iconSize} color={iconColor} />
                 </View>
             )}
         </View>
     );
 };
 
-// Track if animation has played globally (persists across re-renders)
-let hasAnimationPlayed = false;
+// Track if animation has played globally (persists across re-renders and HMR)
+const animationState = { hasPlayed: false };
 
 export default function HomeScreen() {
     const [latestMusic, setLatestMusic] = useState<MediaItem[]>([]);
@@ -165,24 +140,38 @@ export default function HomeScreen() {
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(20)).current;
-    const layoutOpacity = useRef(new Animated.Value(1)).current; // For orientation switch
+    const { dataSource, sourceMode, localProfile, setLocalProfile } = useSettingsStore();
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
 
-    // Orientation transition effect - Wait for layout to settle before showing
+    const columnCardWidth = (width - LEFT_BAR_WIDTH - 48) / 3 - 10;
+    const horizontalItemsCount = isLandscape ? 4 : 3;
+    const numColumns = isLandscape ? Math.floor(width / 180) : 1; // Calculate grid columns based on width
+
+    // View tracking to delay rendering until layout is ready in landscape
+    const [isLayoutReady, setIsLayoutReady] = useState(!isLandscape);
+    const layoutOpacity = useRef(new Animated.Value(isLandscape ? 0 : 1)).current;
+
     useLayoutEffect(() => {
-        // Immediately hide content
+        if (!isLandscape) {
+            setIsLayoutReady(true);
+            layoutOpacity.setValue(1);
+            return;
+        }
+
+        setIsLayoutReady(false);
         layoutOpacity.setValue(0);
 
-        // Wait for layout to fully settle, then fade in
         const timeout = setTimeout(() => {
             Animated.timing(layoutOpacity, {
                 toValue: 1,
                 duration: 200,
                 useNativeDriver: true,
-            }).start();
+            }).start(() => setIsLayoutReady(true));
         }, 250); // 250ms delay allows layout to fully recalculate
 
         return () => clearTimeout(timeout);
-    }, [isLandscape]);
+    }, [isLandscape, layoutOpacity]);
 
     const user = useAuthStore((state) => state.user);
     const logout = useAuthStore((state) => state.logout);
@@ -197,12 +186,8 @@ export default function HomeScreen() {
         addToQueueNext: state.addToQueueNext,
         addToQueueEnd: state.addToQueueEnd,
         playbackError: state.playbackError,
-        clearPlaybackError: state.clearPlaybackError
+        clearPlaybackError: state.clearPlaybackError,
     })));
-    const { dataSource, sourceMode, localProfile, setLocalProfile } = useSettingsStore();
-    const { width, height } = useWindowDimensions();
-    const isLandscape = width > height;
-    const numColumns = isLandscape ? Math.floor(width / 180) : 1; // Calculate grid columns based on width
 
     // Profile edit dialog state (for local-only mode)
     const [profileDialogVisible, setProfileDialogVisible] = useState(false);
@@ -523,7 +508,7 @@ export default function HomeScreen() {
         }> = [];
 
         // Find track data from quickPicks or mostPlayed
-        const allTracks = [...quickPicks, ...mostPlayed];
+        const allTracks = [...recommendations, ...mostPlayed]; // Changed from quickPicks to recommendations
         selectedTracks.forEach(id => {
             const track = allTracks.find(t => t.Id === id);
             if (track) {
@@ -639,14 +624,14 @@ export default function HomeScreen() {
     }, [dataSource]);
 
     // Typing animation state
-    const [displayedGreeting, setDisplayedGreeting] = useState(hasAnimationPlayed ? getGreeting() : '');
-    const [isTypingComplete, setIsTypingComplete] = useState(hasAnimationPlayed);
+    const [displayedGreeting, setDisplayedGreeting] = useState(animationState.hasPlayed ? getGreeting() : '');
+    const [isTypingComplete, setIsTypingComplete] = useState(animationState.hasPlayed);
     const fullGreeting = getGreeting();
     const charIndexRef = useRef(0);
 
     // Typing animation effect
     useEffect(() => {
-        if (hasAnimationPlayed) {
+        if (animationState.hasPlayed) {
             setDisplayedGreeting(fullGreeting);
             setIsTypingComplete(true);
             return;
@@ -666,7 +651,7 @@ export default function HomeScreen() {
                 } else {
                     clearInterval(intervalId);
                     setIsTypingComplete(true);
-                    hasAnimationPlayed = true;
+                    animationState.hasPlayed = true;
                 }
             }, typingSpeed);
         }, 100);
@@ -733,8 +718,8 @@ export default function HomeScreen() {
                 // Fetch Most Played and Recently Played from database
                 try {
                     const [mostPlayedTracks, recentTracks] = await Promise.all([
-                        DatabaseService.getMostPlayed(10),
-                        DatabaseService.getRecentlyPlayed(10),
+                        DatabaseService.getMostPlayed('local', 10),
+                        DatabaseService.getRecentlyPlayed('local', 10),
                     ]);
 
                     // Transform DB tracks to MediaItem format
@@ -771,6 +756,33 @@ export default function HomeScreen() {
                     jellyfinApi.getRecommendations(),
                     jellyfinApi.getRecommendedArtists(),
                 ]);
+
+                // Fetch unified isolated history from database for jellyfin
+                try {
+                    const [mostPlayedTracks, recentTracks] = await Promise.all([
+                        DatabaseService.getMostPlayed('jellyfin', 10),
+                        DatabaseService.getRecentlyPlayed('jellyfin', 10),
+                    ]);
+                    // Database maps back to Track objects; convert them to MediaItem shapes for UI
+                    const transformDbTrack = (t: any): MediaItem => ({
+                        Id: t.id,
+                        Name: t.name,
+                        Type: 'Audio',
+                        Artists: [t.artist],
+                        AlbumArtist: t.artist,
+                        Album: t.album,
+                        RunTimeTicks: t.durationMillis ? t.durationMillis * 10000 : 0,
+                        UserData: { IsFavorite: t.isFavorite || false },
+                        streamUrl: t.streamUrl,
+                        imageUrl: t.imageUrl || '',
+                    });
+                    setMostPlayed(mostPlayedTracks.map(transformDbTrack));
+                    setRecentlyPlayed(recentTracks.map(transformDbTrack));
+                } catch (dbErr) {
+                    console.error('Failed to fetch Jellyfin play history:', dbErr);
+                    setMostPlayed([]);
+                    setRecentlyPlayed([]);
+                }
 
                 if (latestRes.status === 'fulfilled') setLatestMusic(latestRes.value);
                 else console.error("Latest Music failed:", latestRes.reason);
@@ -939,7 +951,6 @@ export default function HomeScreen() {
                 onPress={() => handleSongPress(item)}
                 onLongPress={() => handleLongPress(item)}
                 onMenuPress={() => openTrackMenu(item)}
-                theme={theme}
                 getImageUrl={getItemImageUrl}
                 isSelectionMode={isSelectionMode}
                 isSelected={isSelected}
@@ -966,8 +977,10 @@ export default function HomeScreen() {
         );
     };
 
-
-
+    // Initial loading state
+    if (loading && !refreshing && latestMusic.length === 0 && resumeItems.length === 0) {
+        return <HomeScreenSkeleton isLandscape={isLandscape} numColumns={numColumns} width={width} />;
+    }
 
 
     return (
@@ -990,44 +1003,34 @@ export default function HomeScreen() {
                                     {selectedTracks.size} Selected
                                 </Text>
                                 <IconButton icon="dots-vertical" onPress={() => setIsSelectionMenuVisible(true)} />
-                                <Portal>
-                                    <Dialog
-                                        visible={isSelectionMenuVisible}
-                                        onDismiss={() => setIsSelectionMenuVisible(false)}
-                                        style={[dialogStyles.dialog, isLandscape && dialogStyles.dialogLandscape]}
-                                    >
-                                        <Dialog.Title style={isLandscape && { fontSize: 16 }}>Selected Actions</Dialog.Title>
-                                        <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
+                                <ActionSheet
+                                    visible={isSelectionMenuVisible}
+                                    onClose={() => setIsSelectionMenuVisible(false)}
+                                    title="Selected Actions"
+                                    heightPercentage={40}
+                                >
+                                    <View style={{ gap: 4 }}>
+                                        <List.Item
+                                            title="Download Selected"
+                                            left={props => <List.Icon {...props} icon="download" />}
+                                            onPress={handleDownloadSelected}
+                                            disabled={dataSource === 'local'}
+                                        />
+                                        <List.Item
+                                            title="Add to Playlist"
+                                            left={props => <List.Icon {...props} icon="playlist-plus" />}
+                                            onPress={handleAddSelectedToPlaylist}
+                                        />
+                                        {dataSource === 'local' && (
                                             <List.Item
-                                                title="Download Selected"
-                                                left={props => <List.Icon {...props} icon="download" />}
-                                                onPress={handleDownloadSelected}
-                                                disabled={dataSource === 'local'}
-                                                titleStyle={isLandscape && { fontSize: 13 }}
-                                                style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
+                                                title="Delete from Device"
+                                                left={props => <List.Icon {...props} icon="delete" color={theme.colors.error} />}
+                                                titleStyle={{ color: theme.colors.error }}
+                                                onPress={handleDeleteSelected}
                                             />
-                                            <List.Item
-                                                title="Add to Playlist"
-                                                left={props => <List.Icon {...props} icon="playlist-plus" />}
-                                                onPress={handleAddSelectedToPlaylist}
-                                                titleStyle={isLandscape && { fontSize: 13 }}
-                                                style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                                            />
-                                            {dataSource === 'local' && (
-                                                <List.Item
-                                                    title="Delete from Device"
-                                                    left={props => <List.Icon {...props} icon="delete" color={theme.colors.error} />}
-                                                    titleStyle={{ color: theme.colors.error, ...(isLandscape && { fontSize: 13 }) }}
-                                                    onPress={handleDeleteSelected}
-                                                    style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                                                />
-                                            )}
-                                        </Dialog.Content>
-                                        <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                                            <Button onPress={() => setIsSelectionMenuVisible(false)} labelStyle={isLandscape && { fontSize: 12 }}>Cancel</Button>
-                                        </Dialog.Actions>
-                                    </Dialog>
-                                </Portal>
+                                        )}
+                                    </View>
+                                </ActionSheet>
                             </View>
                         ) : (
                             <View style={{ flex: 1 }}>
@@ -1084,13 +1087,6 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                    {/* Loading State - Rendered inline so header stays visible */}
-                    {loading && !refreshing && latestMusic.length === 0 && (
-                        <View style={{ height: 300, justifyContent: 'center', alignItems: 'center' }}>
-                            <Loader />
-                        </View>
-                    )}
-
                     {/* Playback Error Banner */}
                     {playbackError && dataSource !== 'local' && (
                         <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
@@ -1119,15 +1115,13 @@ export default function HomeScreen() {
                             </Button>
                         </View>
                     )}
-                    {/* Empty State */}
-                    {!loading && !error && latestMusic.length === 0 && (
-                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60 }}>
-                            <Icon name="music-off" size={64} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.5 }} />
-                            <Text variant="titleMedium" style={{ marginTop: 16, marginBottom: 8, color: theme.colors.onSurface }}>No Music Found</Text>
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', paddingHorizontal: 32 }}>
-                                {dataSource === 'local' ? 'Add some audio files to your device to get started.' : 'Your Jellyfin library seems to be empty.'}
-                            </Text>
-                        </View>
+                    {/* Empty state (Jellyfin only) when everything is empty */}
+                    {!loading && !error && dataSource !== 'local' && latestMusic.length === 0 && resumeItems.length === 0 && recommendations.length === 0 && recommendedArtists.length === 0 && mostPlayed.length === 0 && recentlyPlayed.length === 0 && (
+                        <EmptyState
+                            icon='server-network-off'
+                            title='No items found'
+                            description='Your Jellyfin library seems to be empty.'
+                        />
                     )}
 
 
@@ -1266,156 +1260,124 @@ export default function HomeScreen() {
 
                     {/* Empty state for local mode */}
                     {dataSource === 'local' && latestMusic.length === 0 && recommendations.length === 0 && !loading && (
-                        <View style={styles.emptyState}>
-                            <Text variant="titleMedium" style={{ textAlign: 'center', marginBottom: 8 }}>
-                                No local music found
-                            </Text>
-                            <Text variant="bodyMedium" style={{ textAlign: 'center', color: theme.colors.onSurfaceVariant, marginBottom: 16 }}>
-                                Go to Settings → Storage to select a music folder
-                            </Text>
-                            <Button mode="contained" onPress={() => navigation.navigate('StorageSettings')}>
-                                Open Storage Settings
-                            </Button>
-                        </View>
+                        <EmptyState
+                            icon="folder-open"
+                            title="No local music found"
+                            description="Go to Settings → Storage to select a music folder"
+                            actionLabel="Open Storage Settings"
+                            onAction={() => navigation.navigate('StorageSettings')}
+                        />
                     )}
                 </Animated.View>
             </ScrollView>
 
             {/* Profile Edit Dialog (local-only mode) */}
-            <Portal>
-                <Dialog visible={profileDialogVisible} onDismiss={() => setProfileDialogVisible(false)}>
-                    <Dialog.Title>Edit Profile</Dialog.Title>
-                    <Dialog.Content>
-                        <View style={{ alignItems: 'center', marginBottom: 16 }}>
-                            <TouchableOpacity onPress={handlePickImage}>
-                                {localProfile.imageUri ? (
-                                    <Avatar.Image size={80} source={{ uri: localProfile.imageUri }} />
-                                ) : (
-                                    <Avatar.Icon size={80} icon="account" />
-                                )}
-                            </TouchableOpacity>
-                            <Button
-                                mode="text"
-                                onPress={handlePickImage}
-                                style={{ marginTop: 8 }}
-                            >
-                                Change Photo
-                            </Button>
-                        </View>
-                        <TextInput
-                            label="Display Name"
-                            value={editName}
-                            onChangeText={setEditName}
-                            mode="outlined"
-                            style={{ marginBottom: 8 }}
-                        />
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setProfileDialogVisible(false)}>Cancel</Button>
-                        <Button mode="contained" onPress={handleSaveProfile}>Save</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                {/* Track Options Menu */}
-                <Dialog visible={isTrackMenuVisible} onDismiss={() => setIsTrackMenuVisible(false)}>
-                    <Dialog.Title>{selectedTrack?.Name || 'Track Options'}</Dialog.Title>
-                    <Dialog.Content>
-                        <List.Item
-                            title="Play Next"
-                            description="Add to queue after current song"
-                            left={props => <List.Icon {...props} icon="playlist-play" />}
-                            onPress={handlePlayNext}
-                        />
-                        <List.Item
-                            title="Add to Queue"
-                            description="Add to end of queue"
-                            left={props => <List.Icon {...props} icon="playlist-plus" />}
-                            onPress={handleAddToQueue}
-                        />
-                        <List.Item
-                            title="Add to Playlist"
-                            description="Save to a playlist"
-                            left={props => <List.Icon {...props} icon="playlist-music" />}
-                            onPress={handleOpenAddToPlaylist}
-                        />
-                        {dataSource !== 'local' && (
-                            <List.Item
-                                title="Download"
-                                description="Save for offline listening"
-                                left={props => <List.Icon {...props} icon="download" />}
-                                onPress={handleDownloadTrack}
-                            />
-                        )}
-                        {dataSource === 'local' && (
-                            <List.Item
-                                title="Delete from Device"
-                                description="Permanently remove this track"
-                                titleStyle={{ color: '#f44336' }}
-                                left={props => <List.Icon {...props} icon="delete" color="#f44336" />}
-                                onPress={handleDeleteTrack}
-                            />
-                        )}
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsTrackMenuVisible(false)}>Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                {/* Add to Playlist Dialog */}
-                <Dialog
-                    visible={isAddToPlaylistVisible}
-                    onDismiss={() => setIsAddToPlaylistVisible(false)}
-                    style={[dialogStyles.dialog, isLandscape && dialogStyles.dialogLandscape]}
-                >
-                    <Dialog.Title style={isLandscape && { fontSize: 16 }}>Add to Playlist</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        {isAddingToPlaylist ? (
-                            <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
-                                <ActivityIndicator size="large" color={theme.colors.primary} />
-                                <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>Adding to playlist...</Text>
-                            </View>
-                        ) : (
-                            <ScrollView style={{ maxHeight: isLandscape ? 180 : 300 }}>
-                                {playlists.map(playlist => (
-                                    <List.Item
-                                        key={playlist.Id}
-                                        title={playlist.Name}
-                                        left={props => <List.Icon {...props} icon="playlist-music" />}
-                                        onPress={() => handleAddToPlaylist(playlist.Id)}
-                                        titleStyle={isLandscape && { fontSize: 13 }}
-                                        style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                                    />
-                                ))}
-                            </ScrollView>
-                        )}
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
+            {/* Profile Edit ActionSheet (local-only mode) */}
+            <ActionSheet visible={profileDialogVisible} onClose={() => setProfileDialogVisible(false)} title="Edit Profile" heightPercentage={45}>
+                <View style={{ gap: 16 }}>
+                    <View style={{ alignItems: 'center' }}>
+                        <TouchableOpacity onPress={handlePickImage}>
+                            {localProfile.imageUri ? (
+                                <Avatar.Image size={80} source={{ uri: localProfile.imageUri }} />
+                            ) : (
+                                <Avatar.Icon size={80} icon="account" />
+                            )}
+                        </TouchableOpacity>
                         <Button
-                            onPress={() => setIsAddToPlaylistVisible(false)}
-                            labelStyle={isLandscape && { fontSize: 12 }}
-                            disabled={isAddingToPlaylist}
+                            mode="text"
+                            onPress={handlePickImage}
+                            style={{ marginTop: 8 }}
                         >
-                            Cancel
+                            Change Photo
                         </Button>
-                    </Dialog.Actions>
-                </Dialog>
+                    </View>
+                    <TextInput
+                        label="Display Name"
+                        value={editName}
+                        onChangeText={setEditName}
+                        mode="outlined"
+                    />
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setProfileDialogVisible(false)}>Cancel</Button>
+                        <Button mode="contained" onPress={handleSaveProfile}>Save</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
-                {/* Duplicate Song Dialog */}
-                <Dialog
-                    visible={isDuplicateDialogVisible}
-                    onDismiss={() => setIsDuplicateDialogVisible(false)}
-                    style={[dialogStyles.dialog, isLandscape && dialogStyles.dialogLandscape]}
-                >
-                    <Dialog.Title style={isLandscape && { fontSize: 16 }}>Duplicate Song</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        <Text variant={isLandscape ? "bodySmall" : "bodyMedium"}>This song is already in the playlist. Do you want to add it anyway?</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                        <Button onPress={() => setIsDuplicateDialogVisible(false)} labelStyle={isLandscape && { fontSize: 12 }}>Cancel</Button>
-                        <Button onPress={() => pendingPlaylistId && confirmAddToPlaylist(pendingPlaylistId)} labelStyle={isLandscape && { fontSize: 12 }}>Add Anyway</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
+            {/* Track Options Menu */}
+            <ActionSheet visible={isTrackMenuVisible} onClose={() => setIsTrackMenuVisible(false)} title={selectedTrack?.Name || 'Track Options'}>
+                <View style={{ gap: 4 }}>
+                    <List.Item
+                        title="Play Next"
+                        description="Add to queue after current song"
+                        left={props => <List.Icon {...props} icon="playlist-play" />}
+                        onPress={handlePlayNext}
+                    />
+                    <List.Item
+                        title="Add to Queue"
+                        description="Add to end of queue"
+                        left={props => <List.Icon {...props} icon="playlist-plus" />}
+                        onPress={handleAddToQueue}
+                    />
+                    <List.Item
+                        title="Add to Playlist"
+                        description="Save to a playlist"
+                        left={props => <List.Icon {...props} icon="playlist-music" />}
+                        onPress={handleOpenAddToPlaylist}
+                    />
+                    {dataSource !== 'local' && (
+                        <List.Item
+                            title="Download"
+                            description="Save for offline listening"
+                            left={props => <List.Icon {...props} icon="download" />}
+                            onPress={handleDownloadTrack}
+                        />
+                    )}
+                    {dataSource === 'local' && (
+                        <List.Item
+                            title="Delete from Device"
+                            description="Permanently remove this track"
+                            titleStyle={{ color: '#f44336' }}
+                            left={props => <List.Icon {...props} icon="delete" color="#f44336" />}
+                            onPress={handleDeleteTrack}
+                        />
+                    )}
+                </View>
+            </ActionSheet>
+
+            {/* Add to Playlist ActionSheet */}
+            <ActionSheet visible={isAddToPlaylistVisible} onClose={() => setIsAddToPlaylistVisible(false)} title="Add to Playlist" scrollable>
+                <View style={{ gap: 4 }}>
+                    {isAddingToPlaylist ? (
+                        <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
+                            <ActivityIndicator size="large" color={theme.colors.primary} />
+                            <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>Adding to playlist...</Text>
+                        </View>
+                    ) : (
+                        playlists.map(playlist => (
+                            <List.Item
+                                key={playlist.Id}
+                                title={playlist.Name}
+                                left={props => <List.Icon {...props} icon="playlist-music" />}
+                                onPress={() => handleAddToPlaylist(playlist.Id)}
+                            />
+                        ))
+                    )}
+                </View>
+            </ActionSheet>
+
+            {/* Duplicate Song ActionSheet */}
+            <ActionSheet visible={isDuplicateDialogVisible} onClose={() => setIsDuplicateDialogVisible(false)} title="Duplicate Song" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
+                        <Button mode="contained" onPress={() => {
+                            if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
+                        }}>Add Anyway</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
             {/* Orientation Transition Curtain */}
             <Animated.View

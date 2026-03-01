@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Dimensions, Image, Animated, PanResponder, LayoutAnimation, Platform, UIManager, Alert } from 'react-native';
-import { Text, IconButton, useTheme, Surface, ActivityIndicator, Portal, Dialog, List, Button } from 'react-native-paper';
+import { Text, IconButton, useTheme, Surface, ActivityIndicator, Portal, Dialog, List, Button, Snackbar } from 'react-native-paper';
 import { usePlayerStore } from '../store/playerStore';
 import { jellyfinApi } from '../api/jellyfin';
 import { SeekBar } from '../components/SeekBar';
@@ -13,16 +13,20 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { DatabaseService } from '../services/DatabaseService';
 import { audioService } from '../services/AudioService';
+import { downloadService } from '../services/DownloadService';
 import { ScrollView } from 'react-native';
 import QueueBottomSheet from '../components/QueueBottomSheet';
+import ActionSheet from '../components/ActionSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import LyricsView from '../components/LyricsView';
-import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import ArtworkCarousel from '../components/ArtworkCarousel';
 import { ProgressControl } from '../components/ProgressControl';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useShallow } from 'zustand/react/shallow';
+import { useAuthStore } from '../store/authStore';
+import * as Haptics from 'expo-haptics';
 import { getColors } from 'react-native-image-colors';
-import type { AndroidImageColors, IOSImageColors } from 'react-native-image-colors';
 import { useIsAppActive } from '../hooks/useAppState';
 import { isColorDarkHex, lightenHexColor, adjustHexColor, getContrastingIconColorFromHex } from '../utils/colorUtils';
 import { dialogStyles } from '../utils/dialogStyles';
@@ -31,7 +35,11 @@ import { useWindowDimensions } from 'react-native';
 
 // const { width } = Dimensions.get('window'); // Removed static width
 
-export default function PlayerScreen() {
+interface PlayerScreenProps {
+    isGlobal?: boolean;
+}
+
+export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Select specific fields to avoid re-rendering on positionMillis updates
     const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queue, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
@@ -55,13 +63,13 @@ export default function PlayerScreen() {
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
     // State for extracted colors
-    const [extractedColors, setExtractedColors] = useState<AndroidImageColors | IOSImageColors | null>(null);
+    const [extractedColors, setExtractedColors] = useState<any>(null);
 
     // Track current image URL to detect changes and prevent stale updates
     const currentImageUrlRef = useRef<string | null>(null);
 
     // Play tracking - record plays to database when track changes
-    const previousTrackRef = useRef<{ id: string; startTime: number; duration: number } | null>(null);
+    const previousTrackRef = useRef<{ track: any; startTime: number; duration: number } | null>(null);
 
     // Orientation Transition - Wait for layout to settle before showing
     const layoutOpacity = useRef(new Animated.Value(1)).current;
@@ -83,15 +91,19 @@ export default function PlayerScreen() {
 
     useEffect(() => {
         // When current track changes, record the previous track's play
-        if (currentTrack?.id && previousTrackRef.current && previousTrackRef.current.id !== currentTrack.id) {
+        if (currentTrack?.id && previousTrackRef.current && previousTrackRef.current.track.id !== currentTrack.id) {
             const playDuration = Date.now() - previousTrackRef.current.startTime;
             const trackDuration = previousTrackRef.current.duration;
             const completedPlay = trackDuration > 0 && playDuration >= trackDuration * 0.8; // 80% threshold
 
-            // Only record if listened for at least 30 seconds
-            if (playDuration > 30000) {
+            // Only record if listened for at least 5 seconds
+            if (playDuration > 5000) {
+                // Local tracks have a truthy file:// streamUrl parsed from disk.
+                // Jellyfin tracks have an empty streamUrl (resolved on the fly by audio service).
+                const source = previousTrackRef.current.track.streamUrl ? 'local' : 'jellyfin';
                 DatabaseService.recordPlay(
-                    previousTrackRef.current.id,
+                    previousTrackRef.current.track,
+                    source,
                     playDuration,
                     completedPlay
                 ).catch(console.error);
@@ -101,7 +113,7 @@ export default function PlayerScreen() {
         // Update ref with current track
         if (currentTrack?.id) {
             previousTrackRef.current = {
-                id: currentTrack.id,
+                track: currentTrack,
                 startTime: Date.now(),
                 duration: currentTrack.durationMillis || 0,
             };
@@ -354,20 +366,13 @@ export default function PlayerScreen() {
     const [artworkError, setArtworkError] = useState(false);
     const [isSpeedDialogVisible, setIsSpeedDialogVisible] = useState(false);
 
-    // Swipe down to close gesture
-    const swipeDownPanResponder = useMemo(() => PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-            // Only capture vertical swipes down
-            return gestureState.dy > 15 && Math.abs(gestureState.dx) < Math.abs(gestureState.dy);
-        },
-        onPanResponderRelease: (_, gestureState) => {
-            // If swiped down more than 50px, close the player
-            if (gestureState.dy > 50) {
-                navigation.goBack();
-            }
-        },
-    }), [navigation]);
+    const handleClosePlayer = () => {
+        if (isGlobal) {
+            usePlayerStore.getState().setPlayerExpanded(false);
+        } else {
+            navigation.goBack();
+        }
+    };
 
     // Playlist Management State
     const [playlists, setPlaylists] = useState<any[]>([]);
@@ -391,6 +396,7 @@ export default function PlayerScreen() {
     const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
     const [isDuplicateDialogVisible, setIsDuplicateDialogVisible] = useState(false);
     const [pendingPlaylistId, setPendingPlaylistId] = useState<string | null>(null);
+    const [snackbarVisible, setSnackbarVisible] = useState(false);
     const [isSubmenuVisible, setIsSubmenuVisible] = useState(false); // Track Options
     const [isRemoveConfirmVisible, setIsRemoveConfirmVisible] = useState(false);
     const [isDeleteConfirmVisible, setIsDeleteConfirmVisible] = useState(false); // New state for delete confirmation
@@ -431,6 +437,7 @@ export default function PlayerScreen() {
 
     const handleLike = async () => {
         if (!currentTrack) return;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
         if (isLocalTrack) {
             // Local track: use local library store
@@ -454,6 +461,16 @@ export default function PlayerScreen() {
                 updateTrackFavorite(currentTrack.id, !newStatus);
             }
         }
+    };
+
+    const handleToggleShuffle = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        toggleShuffle();
+    };
+
+    const handleToggleRepeat = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        toggleRepeat();
     };
 
     // Playlist & Menu Handlers
@@ -580,6 +597,7 @@ export default function PlayerScreen() {
             setIsAddToPlaylistVisible(false);
             setIsDuplicateDialogVisible(false);
             setPendingPlaylistId(null);
+            setSnackbarVisible(true);
         } catch (error) {
             console.error('Failed to add to playlist:', error);
         }
@@ -647,19 +665,22 @@ export default function PlayerScreen() {
         }
 
         if (artistId) {
-            // Navigate through nested stacks: first go back to Main, then to HomeStack Detail
-            navigation.dispatch(
-                CommonActions.navigate({
-                    name: 'Main',
-                    params: {
-                        screen: 'HomeStack',
+            handleClosePlayer(); // Close player screen first
+            setTimeout(() => {
+                // Navigate through nested stacks: first go back to Main, then to HomeStack Detail
+                navigation.dispatch(
+                    CommonActions.navigate({
+                        name: 'Main',
                         params: {
-                            screen: 'Detail',
-                            params: { itemId: artistId, type: 'MusicArtist' }
+                            screen: 'HomeStack',
+                            params: {
+                                screen: 'Detail',
+                                params: { itemId: artistId, type: 'MusicArtist' }
+                            }
                         }
-                    }
-                })
-            );
+                    })
+                );
+            }, 50); // Small delay to let close animation start
         }
     };
 
@@ -733,8 +754,16 @@ export default function PlayerScreen() {
                 />
             )}
 
+            {/* Dark overlay when lyrics are visible to improve text contrast against bright artwork */}
+            {isLyricsVisible && (
+                <View
+                    style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.65)' }]}
+                    pointerEvents="none"
+                />
+            )}
+
             {/* Content wrapped in SafeAreaView */}
-            <SafeAreaView style={styles.content} edges={['top', 'bottom']} {...swipeDownPanResponder.panHandlers}>
+            <SafeAreaView style={styles.content} edges={['top', 'bottom']}>
                 {/* Header - only show in portrait */}
                 {!isLandscape && (
                     <View style={styles.header}>
@@ -742,7 +771,7 @@ export default function PlayerScreen() {
                             icon="chevron-down"
                             iconColor={playerColors.iconColor}
                             size={32}
-                            onPress={() => navigation.goBack()}
+                            onPress={handleClosePlayer}
                         />
                         <Text variant="titleMedium" style={{ color: playerColors.textColor, fontWeight: 'bold' }}>
                             {isLyricsVisible ? 'Lyrics' : 'Now Playing'}
@@ -766,21 +795,7 @@ export default function PlayerScreen() {
                                 />
                             ) : (
                                 <View style={{ width: '100%', aspectRatio: 1, maxHeight: height * 0.85, alignItems: 'center', justifyContent: 'center' }}>
-                                    <Surface style={{ elevation: 8, borderRadius: 12, backgroundColor: 'transparent' }} elevation={5}>
-                                        {currentTrack.imageUrl && !artworkError ? (
-                                            <ExpoImage
-                                                source={{ uri: currentTrack.imageUrl }}
-                                                style={{ width: Math.min(height * 0.8, width * 0.38), height: Math.min(height * 0.8, width * 0.38), borderRadius: 12 }}
-                                                contentFit="cover"
-                                                transition={500}
-                                                onError={() => setArtworkError(true)}
-                                            />
-                                        ) : (
-                                            <View style={{ width: Math.min(height * 0.8, width * 0.38), height: Math.min(height * 0.8, width * 0.38), borderRadius: 12, backgroundColor: theme.colors.surfaceVariant, justifyContent: 'center', alignItems: 'center' }}>
-                                                <Icon name="music-note" size={60} color={theme.colors.onSurfaceVariant} />
-                                            </View>
-                                        )}
-                                    </Surface>
+                                    <ArtworkCarousel size={Math.min(height * 0.8, width * 0.38)} borderRadius={12} />
                                 </View>
                             )}
                         </View>
@@ -812,13 +827,15 @@ export default function PlayerScreen() {
                                     icon={repeatMode === 'one' ? "repeat-once" : "repeat"}
                                     iconColor={repeatMode !== 'off' ? playerColors.activeColor : playerColors.secondaryTextColor}
                                     size={24}
-                                    onPress={toggleRepeat}
+                                    onPress={handleToggleRepeat}
+                                    accessibilityLabel={repeatMode === 'one' ? "Repeat One" : repeatMode === 'all' ? "Repeat All" : "Repeat Off"}
                                 />
                                 <IconButton
                                     icon="skip-previous"
                                     iconColor={(backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.iconColor)}
                                     size={32}
                                     onPress={playPrevious}
+                                    accessibilityLabel="Previous Track"
                                 />
                                 <Surface style={[styles.playButton, { width: 56, height: 56, backgroundColor: (backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.textColor) }]} elevation={0}>
                                     {isBuffering ? (
@@ -830,6 +847,7 @@ export default function PlayerScreen() {
                                             size={32}
                                             onPress={togglePlayPause}
                                             style={{ margin: 0 }}
+                                            accessibilityLabel={isPlaying ? "Pause" : "Play"}
                                         />
                                     )}
                                 </Surface>
@@ -838,6 +856,7 @@ export default function PlayerScreen() {
                                     iconColor={(backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.iconColor)}
                                     size={32}
                                     onPress={playNext}
+                                    accessibilityLabel="Next Track"
                                 />
                                 <IconButton
                                     icon="shuffle"
@@ -858,27 +877,14 @@ export default function PlayerScreen() {
                             </View>
 
                             {/* Bottom Actions */}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-evenly', paddingHorizontal: 16 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', paddingHorizontal: 16 }}>
                                 {/* Playback Speed Button */}
-                                <TouchableOpacity
+                                <IconButton
+                                    icon="speedometer"
+                                    iconColor={playbackRate !== 1.0 ? playerColors.activeColor : playerColors.secondaryTextColor}
+                                    size={24}
                                     onPress={() => setIsSpeedDialogVisible(true)}
-                                    style={{
-                                        height: 32,
-                                        justifyContent: 'center',
-                                        alignItems: 'center',
-                                        minWidth: 32,
-                                    }}
-                                >
-                                    <Text
-                                        variant="labelMedium"
-                                        style={{
-                                            color: playbackRate !== 1.0 ? playerColors.activeColor : playerColors.secondaryTextColor,
-                                            fontWeight: 'bold',
-                                        }}
-                                    >
-                                        {playbackRate}x
-                                    </Text>
-                                </TouchableOpacity>
+                                />
                                 <IconButton
                                     icon="power-sleep"
                                     iconColor={sleepTimerTarget ? playerColors.activeColor : playerColors.secondaryTextColor}
@@ -929,21 +935,7 @@ export default function PlayerScreen() {
                             ) : (
                                 <>
                                     <View style={styles.artworkContainer}>
-                                        <Surface style={styles.artworkSurface} elevation={5}>
-                                            {currentTrack.imageUrl && !artworkError ? (
-                                                <ExpoImage
-                                                    source={{ uri: currentTrack.imageUrl }}
-                                                    style={{ width: width - 80, height: width - 80, borderRadius: 12 }} // Inline dynamic style for Portrait
-                                                    contentFit="cover"
-                                                    transition={500}
-                                                    onError={() => setArtworkError(true)}
-                                                />
-                                            ) : (
-                                                <View style={[styles.artwork, { backgroundColor: theme.colors.surfaceVariant, justifyContent: 'center', alignItems: 'center' }]}>
-                                                    <Icon name="music-note" size={100} color={theme.colors.onSurfaceVariant} />
-                                                </View>
-                                            )}
-                                        </Surface>
+                                        <ArtworkCarousel size={width - 80} borderRadius={12} />
                                     </View>
 
                                     <View style={styles.trackInfo}>
@@ -1021,6 +1013,7 @@ export default function PlayerScreen() {
                                             iconColor={playerColors.activeColor}
                                             size={28}
                                             onPress={handleLike}
+                                            accessibilityLabel={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
                                         />
                                         <IconButton
                                             icon="dots-vertical"
@@ -1047,7 +1040,8 @@ export default function PlayerScreen() {
                                     icon="shuffle"
                                     iconColor={shuffleMode ? playerColors.activeColor : playerColors.secondaryTextColor}
                                     size={24}
-                                    onPress={toggleShuffle}
+                                    onPress={handleToggleShuffle}
+                                    accessibilityLabel={shuffleMode ? "Disable Shuffle" : "Enable Shuffle"}
                                 />
                                 <IconButton
                                     icon="skip-previous"
@@ -1084,29 +1078,15 @@ export default function PlayerScreen() {
 
                             <View style={styles.bottomActions}>
                                 {/* Playback Speed Button */}
-                                <TouchableOpacity
+                                <IconButton
+                                    icon="speedometer"
+                                    iconColor={playbackRate !== 1.0 ? playerColors.activeColor : playerColors.secondaryTextColor}
+                                    size={24}
                                     onPress={() => setIsSpeedDialogVisible(true)}
-                                    style={{
-                                        height: 40,
-                                        justifyContent: 'center',
-                                        alignItems: 'center',
-                                        minWidth: 40,
-                                        paddingHorizontal: 4
-                                    }}
-                                >
-                                    <Text
-                                        variant="labelLarge"
-                                        style={{
-                                            color: playbackRate !== 1.0 ? playerColors.activeColor : playerColors.secondaryTextColor,
-                                            fontWeight: 'bold',
-                                        }}
-                                    >
-                                        {playbackRate}x
-                                    </Text>
-                                </TouchableOpacity>
+                                />
 
                                 <IconButton
-                                    icon="script-text-outline"
+                                    icon="microphone-variant"
                                     iconColor={isLyricsVisible ? playerColors.activeColor : playerColors.secondaryTextColor}
                                     size={24}
                                     onPress={() => {
@@ -1117,7 +1097,14 @@ export default function PlayerScreen() {
 
                                 {/* Sleep Timer Icon */}
                                 {/* Sleep Timer Icon or Countdown */}
-                                {sleepTimerTarget && sleepTimerTarget > Date.now() ? (
+                                {sleepTimerTarget === 'endOfTrack' ? (
+                                    <IconButton
+                                        icon="power-sleep"
+                                        iconColor={playerColors.activeColor}
+                                        size={24}
+                                        onPress={() => setIsSleepTimerVisible(true)}
+                                    />
+                                ) : sleepTimerTarget && typeof sleepTimerTarget === 'number' && (sleepTimerTarget as number) > Date.now() ? (
                                     <TouchableOpacity
                                         onPress={() => setIsSleepTimerVisible(true)}
                                         style={{
@@ -1136,7 +1123,7 @@ export default function PlayerScreen() {
                                             }}
                                         >
                                             {(() => {
-                                                const diff = sleepTimerTarget - Date.now();
+                                                const diff = (sleepTimerTarget as number) - Date.now();
                                                 const mins = Math.floor(diff / 60000);
                                                 const secs = Math.floor((diff % 60000) / 1000);
                                                 return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -1167,198 +1154,146 @@ export default function PlayerScreen() {
                 )}{/* End Landscape Check */}
             </SafeAreaView>
 
-            <Portal>
-                <Dialog
-                    visible={isSleepTimerVisible}
-                    onDismiss={() => setIsSleepTimerVisible(false)}
-                    style={[
-                        { backgroundColor: theme.colors.elevation.level3 },
-                        dialogStyles.dialog,
-                        isLandscape && dialogStyles.dialogLandscape
-                    ]}
-                >
-                    <Dialog.Title style={[
-                        { color: theme.colors.onSurface },
-                        isLandscape && { fontSize: 16, paddingBottom: 4 }
-                    ]}>Sleep Timer</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        <View>
-                            {[5, 15, 30, 45, 60].map(min => (
-                                <List.Item
-                                    key={min}
-                                    title={`${min} minutes`}
-                                    onPress={() => {
-                                        setSleepTimer(min);
-                                        setIsSleepTimerVisible(false);
-                                    }}
-                                    left={props => <List.Icon {...props} icon="timer-outline" />}
-                                    titleStyle={{ color: theme.colors.onSurface, fontSize: isLandscape ? 13 : 16 }}
-                                    style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
+            <ActionSheet
+                visible={isSleepTimerVisible}
+                onClose={() => setIsSleepTimerVisible(false)}
+                title="Sleep Timer"
+            >
+                <View style={{ gap: 4 }}>
+                    {[5, 15, 30, 45, 60].map(min => (
+                        <List.Item
+                            key={min}
+                            title={`${min} minutes`}
+                            onPress={() => {
+                                setSleepTimer(min);
+                                setIsSleepTimerVisible(false);
+                            }}
+                            left={props => <List.Icon {...props} icon="timer-outline" />}
+                            titleStyle={{ color: theme.colors.onSurface }}
+                        />
+                    ))}
+                    <List.Item
+                        key="end"
+                        title="End of Track"
+                        onPress={() => {
+                            setSleepTimer('endOfTrack');
+                            setIsSleepTimerVisible(false);
+                        }}
+                        left={props => <List.Icon {...props} icon="skip-next-outline" />}
+                        right={props => sleepTimerTarget === 'endOfTrack' ? <Icon name="check" size={24} color={theme.colors.primary} /> : null}
+                        titleStyle={{ color: theme.colors.onSurface }}
+                    />
+                    <List.Item
+                        key="off"
+                        title="Turn Off Timer"
+                        onPress={() => {
+                            setSleepTimer(null);
+                            setIsSleepTimerVisible(false);
+                        }}
+                        left={props => <List.Icon {...props} icon="close" />}
+                        titleStyle={{ color: theme.colors.error }}
+                    />
+                </View>
+            </ActionSheet>
+
+            <ActionSheet
+                visible={isSpeedDialogVisible}
+                onClose={() => setIsSpeedDialogVisible(false)}
+                title="Playback Speed"
+            >
+                <View style={{ gap: 4 }}>
+                    {[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map(speed => (
+                        <List.Item
+                            key={speed}
+                            title={`${speed}x`}
+                            onPress={() => {
+                                setPlaybackRate(speed);
+                                setIsSpeedDialogVisible(false);
+                            }}
+                            left={props => (
+                                <List.Icon
+                                    {...props}
+                                    icon={playbackRate === speed ? "check-circle" : "speedometer"}
+                                    color={playbackRate === speed ? theme.colors.primary : undefined}
                                 />
-                            ))}
-                            <List.Item
-                                key="end"
-                                title="End of Track"
-                                onPress={() => {
-                                    // Calculate remaining time in minutes
-                                    const { durationMillis, positionMillis } = usePlayerStore.getState();
-                                    const remainingMillis = (durationMillis || 0) - positionMillis;
-                                    const remainingMinutes = remainingMillis / 1000 / 60;
-                                    setSleepTimer(remainingMinutes);
-                                    setIsSleepTimerVisible(false);
-                                }}
-                                left={props => <List.Icon {...props} icon="skip-next-outline" />}
-                                titleStyle={{ color: theme.colors.onSurface, fontSize: isLandscape ? 13 : 16 }}
-                                style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                            />
-                            <List.Item
-                                key="off"
-                                title="Turn Off Timer"
-                                onPress={() => {
-                                    setSleepTimer(null);
-                                    setIsSleepTimerVisible(false);
-                                }}
-                                left={props => <List.Icon {...props} icon="close" />}
-                                titleStyle={{ color: theme.colors.error, fontSize: isLandscape ? 13 : 16 }}
-                                style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                            />
-                        </View>
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                        <Button
-                            onPress={() => setIsSleepTimerVisible(false)}
-                            labelStyle={isLandscape && { fontSize: 12 }}
-                        >Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
-
-            {/* Playback Speed Dialog */}
-            <Portal>
-                <Dialog
-                    visible={isSpeedDialogVisible}
-                    onDismiss={() => setIsSpeedDialogVisible(false)}
-                    style={[
-                        { backgroundColor: theme.colors.elevation.level3 },
-                        dialogStyles.dialog,
-                        isLandscape && dialogStyles.dialogLandscape
-                    ]}
-                >
-                    <Dialog.Title style={[
-                        { color: theme.colors.onSurface },
-                        isLandscape && { fontSize: 16, paddingBottom: 4 }
-                    ]}>Playback Speed</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        <View>
-                            {[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map(speed => (
-                                <List.Item
-                                    key={speed}
-                                    title={`${speed}x`}
-                                    onPress={() => {
-                                        setPlaybackRate(speed);
-                                        setIsSpeedDialogVisible(false);
-                                    }}
-                                    left={props => (
-                                        <List.Icon
-                                            {...props}
-                                            icon={playbackRate === speed ? "check-circle" : "speedometer"}
-                                            color={playbackRate === speed ? theme.colors.primary : undefined}
-                                        />
-                                    )}
-                                    titleStyle={{
-                                        color: playbackRate === speed ? theme.colors.primary : theme.colors.onSurface,
-                                        fontSize: isLandscape ? 13 : 16,
-                                        fontWeight: playbackRate === speed ? 'bold' : 'normal'
-                                    }}
-                                    style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                                />
-                            ))}
-                        </View>
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                        <Button
-                            onPress={() => setIsSpeedDialogVisible(false)}
-                            labelStyle={isLandscape && { fontSize: 12 }}
-                        >Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
-
-            <Portal>
-                {/* Track Options Menu */}
-                <Dialog visible={isSubmenuVisible} onDismiss={() => setIsSubmenuVisible(false)}>
-                    <Dialog.Title>Track Options</Dialog.Title>
-                    <Dialog.Content>
-                        {/* Play Next / Add to Queue logic for CURRENT track */}
-                        <List.Item
-                            title="Play Next"
-                            description="Add to queue after current song"
-                            left={props => <List.Icon {...props} icon="playlist-play" />}
-                            onPress={() => { usePlayerStore.getState().addToQueueNext(currentTrack); setIsSubmenuVisible(false); }}
-                            titleStyle={{ fontSize: isLandscape ? 13 : 16 }}
-                            descriptionStyle={isLandscape && { fontSize: 11 }}
-                            style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
+                            )}
+                            titleStyle={{
+                                color: playbackRate === speed ? theme.colors.primary : theme.colors.onSurface,
+                                fontWeight: playbackRate === speed ? 'bold' : 'normal'
+                            }}
                         />
-                        <List.Item
-                            title="Add to Queue"
-                            description="Add to end of queue"
-                            left={props => <List.Icon {...props} icon="playlist-plus" />}
-                            onPress={handleAddToQueue}
-                            titleStyle={{ fontSize: isLandscape ? 13 : 16 }}
-                            descriptionStyle={isLandscape && { fontSize: 11 }}
-                            style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                        />
+                    ))}
+                </View>
+            </ActionSheet>
 
-                        {/* Playlist Actions */}
-                        <List.Item
-                            title={isPlayingFromPlaylist ? "Add to another playlist" : "Add to Playlist"}
-                            description={!isPlayingFromPlaylist ? "Save to a playlist" : undefined}
-                            left={props => <List.Icon {...props} icon="playlist-music" />}
-                            onPress={handleAddToPlaylistOpen}
-                            titleStyle={{ fontSize: isLandscape ? 13 : 16 }}
-                            descriptionStyle={isLandscape && { fontSize: 11 }}
-                            style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                        />
+            <ActionSheet visible={isSubmenuVisible} onClose={() => setIsSubmenuVisible(false)} title="Track Options">
+                <View style={{ gap: 4 }}>
+                    <List.Item
+                        title="Play Next"
+                        description="Add to queue after current song"
+                        left={props => <List.Icon {...props} icon="playlist-play" />}
+                        onPress={() => { usePlayerStore.getState().addToQueueNext(currentTrack); setIsSubmenuVisible(false); }}
+                    />
+                    <List.Item
+                        title="Add to Queue"
+                        description="Add to end of queue"
+                        left={props => <List.Icon {...props} icon="playlist-plus" />}
+                        onPress={handleAddToQueue}
+                    />
 
-                        {isPlayingFromPlaylist && (
-                            <List.Item
-                                title="Remove from this playlist"
-                                titleStyle={{ color: theme.colors.error, fontSize: isLandscape ? 13 : 16 }}
-                                left={props => <List.Icon {...props} icon="playlist-remove" color={theme.colors.error} />}
-                                onPress={handleRemoveFromPlaylist}
-                                style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
-                            />
-                        )}
+                    <List.Item
+                        title={isPlayingFromPlaylist ? "Add to another playlist" : "Add to Playlist"}
+                        description={!isPlayingFromPlaylist ? "Save to a playlist" : undefined}
+                        left={props => <List.Icon {...props} icon="playlist-music" />}
+                        onPress={() => {
+                            setTimeout(() => handleAddToPlaylistOpen(), 300);
+                        }}
+                    />
 
+                    {isPlayingFromPlaylist && (
                         <List.Item
-                            title={dataSource === 'local' ? "Delete from Device" : "Delete from Server"}
-                            description={dataSource !== 'local' ? "Permanently delete file" : undefined}
-                            titleStyle={{ color: theme.colors.error, fontSize: isLandscape ? 13 : 16 }}
-                            descriptionStyle={isLandscape && { fontSize: 11 }}
-                            left={props => <List.Icon {...props} icon="delete-forever" color={theme.colors.error} />}
+                            title="Remove from this playlist"
+                            titleStyle={{ color: theme.colors.error }}
+                            left={props => <List.Icon {...props} icon="playlist-remove" color={theme.colors.error} />}
                             onPress={() => {
                                 setIsSubmenuVisible(false);
-                                const performDelete = async () => {
-                                    try {
-                                        if (dataSource === 'local') {
-                                            const localLib = useLocalLibraryStore.getState();
-                                            const track = localLib.tracks.find(t => t.id === currentTrack.id);
-                                            // Local delete triggers system dialog, so no app-level alert needed
-                                            if (track) await localLib.deleteTrack(track);
-                                        } else {
-                                            await jellyfinApi.deleteItem(currentTrack.id);
-                                        }
-                                        usePlayerStore.getState().playNext();
-                                    } catch (error: any) {
-                                        console.error('Delete failed:', error);
-                                        const msg = error?.response?.data || error?.message || 'Unknown error';
-                                        Alert.alert('Error', `Failed to delete item: ${msg}`);
-                                    }
-                                };
+                                setTimeout(() => setIsRemoveConfirmVisible(true), 300);
+                            }}
+                        />
+                    )}
 
-                                if (dataSource === 'local') {
-                                    performDelete();
-                                } else {
+                    {dataSource !== 'local' && (
+                        <List.Item
+                            title="Download"
+                            description="Save for offline listening"
+                            left={props => <List.Icon {...props} icon="download" />}
+                            onPress={() => {
+                                if (currentTrack) {
+                                    downloadService.queueTrack({
+                                        id: currentTrack.id,
+                                        name: currentTrack.name,
+                                        artist: currentTrack.artist || 'Unknown Artist',
+                                        album: currentTrack.album || 'Unknown Album',
+                                        imageUrl: currentTrack.imageUrl || '',
+                                        durationMillis: currentTrack.durationMillis,
+                                    }).catch(console.error);
+                                }
+                                setIsSubmenuVisible(false);
+                            }}
+                        />
+                    )}
+
+                    <List.Item
+                        title={dataSource === 'local' ? "Delete from Device" : "Delete from Server"}
+                        description={dataSource !== 'local' ? "Permanently delete file" : undefined}
+                        titleStyle={{ color: theme.colors.error }}
+                        left={props => <List.Icon {...props} icon="delete-forever" color={theme.colors.error} />}
+                        onPress={() => {
+                            setIsSubmenuVisible(false);
+                            if (dataSource === 'local') {
+                                setTimeout(() => setIsDeleteConfirmVisible(true), 300);
+                            } else {
+                                setTimeout(() => {
                                     Alert.alert(
                                         'Delete from Server',
                                         'Are you sure you want to permanently delete this file from your Jellyfin server? This cannot be undone.',
@@ -1367,89 +1302,69 @@ export default function PlayerScreen() {
                                             {
                                                 text: 'Delete',
                                                 style: 'destructive',
-                                                onPress: performDelete
+                                                onPress: async () => {
+                                                    try {
+                                                        await jellyfinApi.deleteItem(currentTrack!.id);
+                                                        usePlayerStore.getState().playNext();
+                                                    } catch (error: any) {
+                                                        console.error('Delete failed:', error);
+                                                        Alert.alert('Error', `Failed to delete item: ${error?.message || 'Unknown error'}`);
+                                                    }
+                                                }
                                             }
                                         ]
                                     );
-                                }
-                            }}
-                            style={isLandscape && { paddingVertical: 2, minHeight: 36 }}
+                                }, 300);
+                            }
+                        }}
+                    />
+                </View>
+            </ActionSheet>
+
+            <ActionSheet visible={isAddToPlaylistVisible} onClose={() => setIsAddToPlaylistVisible(false)} title="Add to Playlist" scrollable>
+                <View style={{ gap: 4 }}>
+                    {playlists.map(playlist => (
+                        <List.Item
+                            key={playlist.Id}
+                            title={playlist.Name}
+                            left={props => <List.Icon {...props} icon="playlist-music" />}
+                            onPress={() => handleAddToPlaylist(playlist.Id)}
                         />
+                    ))}
+                </View>
+            </ActionSheet>
 
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsSubmenuVisible(false)}>Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
+            <ActionSheet visible={isDuplicateDialogVisible} onClose={() => setIsDuplicateDialogVisible(false)} title="Duplicate Song" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
+                        <Button mode="contained" onPress={() => {
+                            if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
+                        }}>Add Anyway</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
-                {/* Add To Playlist Dialog */}
-                <Dialog visible={isAddToPlaylistVisible} onDismiss={() => setIsAddToPlaylistVisible(false)}>
-                    <Dialog.Title>Add to Playlist</Dialog.Title>
-                    <Dialog.Content>
-                        <ScrollView style={{ maxHeight: 300 }}>
-                            {playlists.map(playlist => (
-                                <List.Item
-                                    key={playlist.Id}
-                                    title={playlist.Name}
-                                    left={props => <List.Icon {...props} icon="playlist-music" />}
-                                    onPress={() => handleAddToPlaylist(playlist.Id)}
-                                />
-                            ))}
-                        </ScrollView>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsAddToPlaylistVisible(false)}>Cancel</Button>
-                    </Dialog.Actions>
-                </Dialog>
+            <ActionSheet visible={isRemoveConfirmVisible} onClose={() => setIsRemoveConfirmVisible(false)} title="Remove from Playlist" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">Are you sure you want to remove this song from the playlist?</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsRemoveConfirmVisible(false)}>Cancel</Button>
+                        <Button mode="contained" buttonColor={theme.colors.error} onPress={confirmRemoveFromPlaylist}>Remove</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
-                {/* Duplicate Dialog */}
-                <Dialog
-                    visible={isDuplicateDialogVisible}
-                    onDismiss={() => setIsDuplicateDialogVisible(false)}
-                    style={[dialogStyles.dialog, isLandscape && dialogStyles.dialogLandscape]}
-                >
-                    <Dialog.Title style={isLandscape && { fontSize: 16 }}>Duplicate Song</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        <Text variant={isLandscape ? "bodySmall" : "bodyMedium"}>This song is already in the playlist. Do you want to add it anyway?</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                        <Button onPress={() => setIsDuplicateDialogVisible(false)} labelStyle={isLandscape && { fontSize: 12 }}>Cancel</Button>
-                        <Button onPress={() => pendingPlaylistId && confirmAddToPlaylist(pendingPlaylistId)} labelStyle={isLandscape && { fontSize: 12 }}>Add Anyway</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                {/* Remove Confirmation Dialog */}
-                <Dialog
-                    visible={isRemoveConfirmVisible}
-                    onDismiss={() => setIsRemoveConfirmVisible(false)}
-                    style={[dialogStyles.dialog, isLandscape && dialogStyles.dialogLandscape]}
-                >
-                    <Dialog.Title style={isLandscape && { fontSize: 16 }}>Remove from Playlist</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        <Text variant={isLandscape ? "bodySmall" : "bodyMedium"}>Are you sure you want to remove this song from the playlist?</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                        <Button onPress={() => setIsRemoveConfirmVisible(false)} labelStyle={isLandscape && { fontSize: 12 }}>Cancel</Button>
-                        <Button onPress={confirmRemoveFromPlaylist} labelStyle={isLandscape && { fontSize: 12 }}>Remove</Button>
-                    </Dialog.Actions>
-                </Dialog>
-
-                {/* Delete Confirmation Dialog */}
-                <Dialog
-                    visible={isDeleteConfirmVisible}
-                    onDismiss={() => setIsDeleteConfirmVisible(false)}
-                    style={[dialogStyles.dialog, isLandscape && dialogStyles.dialogLandscape]}
-                >
-                    <Dialog.Title style={isLandscape && { fontSize: 16 }}>Delete from Device</Dialog.Title>
-                    <Dialog.Content style={isLandscape && dialogStyles.contentLandscape}>
-                        <Text variant={isLandscape ? "bodySmall" : "bodyMedium"}>Are you sure you want to delete this file from your device? This action cannot be undone.</Text>
-                    </Dialog.Content>
-                    <Dialog.Actions style={isLandscape && dialogStyles.actionsLandscape}>
-                        <Button onPress={() => setIsDeleteConfirmVisible(false)} labelStyle={isLandscape && { fontSize: 12 }}>Cancel</Button>
-                        <Button onPress={handleDeleteTrack} textColor={theme.colors.error} labelStyle={isLandscape && { fontSize: 12 }}>Delete</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
+            <ActionSheet visible={isDeleteConfirmVisible} onClose={() => setIsDeleteConfirmVisible(false)} title="Delete from Device" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">Are you sure you want to delete this file from your device? This action cannot be undone.</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDeleteConfirmVisible(false)}>Cancel</Button>
+                        <Button mode="contained" buttonColor={theme.colors.error} onPress={handleDeleteTrack}>Delete</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
             {/* AddToPlaylistDialog Component Removed/Inline */}
 
@@ -1486,6 +1401,19 @@ export default function PlayerScreen() {
                     end={{ x: 0, y: 1 }}
                 />
             </Animated.View>
+            <Portal>
+                <Snackbar
+                    visible={snackbarVisible}
+                    onDismiss={() => setSnackbarVisible(false)}
+                    duration={3000}
+                    action={{
+                        label: 'OK',
+                        onPress: () => setSnackbarVisible(false),
+                    }}
+                >
+                    Successfully added to playlist
+                </Snackbar>
+            </Portal>
         </View >
     );
 }

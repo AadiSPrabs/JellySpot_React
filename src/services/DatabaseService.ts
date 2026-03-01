@@ -1,6 +1,7 @@
 import { eq, like, desc, asc, and, or, sql, count } from 'drizzle-orm';
 import { db } from '../db/client';
-import { tracks, playlists, playlistTracks, playHistory, queueState } from '../db/schema';
+import * as FileSystem from 'expo-file-system/legacy';
+import { tracks, playlists, playlistTracks, playHistory, queueState, cachedTracks } from '../db/schema';
 import type { Track } from '../store/localLibraryStore';
 
 // Generate a random ID
@@ -133,9 +134,20 @@ export const DatabaseService = {
             .orderBy(asc(tracks.album));
     },
 
-    // Get Tracks by Artist
-    async getTracksByArtist(artistId: string) {
-        return await db.select().from(tracks).where(eq(tracks.artistId, artistId)).orderBy(asc(tracks.name));
+    // Get Tracks by Artist Id or Name
+    async getTracksByArtist(artistIdOrName: string) {
+        return await db.select()
+            .from(tracks)
+            .where(or(
+                eq(tracks.artistId, artistIdOrName),
+                eq(tracks.artist, artistIdOrName)
+            ))
+            .orderBy(asc(tracks.name));
+    },
+
+    // Get Tracks by exact Artist Name
+    async getTracksByArtistName(artistName: string) {
+        return await db.select().from(tracks).where(eq(tracks.artist, artistName)).orderBy(asc(tracks.name));
     },
 
     // Get Tracks by Album
@@ -186,9 +198,9 @@ export const DatabaseService = {
         await db.insert(playlists).values({
             id,
             name,
-            createdAt: new Date(),
+            createdAt: Date.now(),
         });
-        return { id, name, createdAt: new Date() };
+        return { id, name, createdAt: Date.now() };
     },
 
     // Delete a playlist (cascade deletes playlistTracks)
@@ -239,7 +251,7 @@ export const DatabaseService = {
         await db.insert(playlistTracks).values({
             playlistId,
             trackId,
-            addedAt: new Date(),
+            addedAt: Date.now(),
         });
     },
 
@@ -250,6 +262,21 @@ export const DatabaseService = {
                 eq(playlistTracks.playlistId, playlistId),
                 eq(playlistTracks.trackId, trackId)
             ));
+    },
+
+    // Update playlist track order using addedAt timestamps
+    async updatePlaylistOrder(playlistId: string, trackIdsInOrder: string[]) {
+        const now = Date.now();
+        // Update each track's addedAt timestamp so the first item has the highest timestamp (descending order)
+        for (let i = 0; i < trackIdsInOrder.length; i++) {
+            const trackId = trackIdsInOrder[i];
+            await db.update(playlistTracks)
+                .set({ addedAt: now - (i * 1000) })
+                .where(and(
+                    eq(playlistTracks.playlistId, playlistId),
+                    eq(playlistTracks.trackId, trackId)
+                ));
+        }
     },
 
     // Get tracks in a playlist (JOIN query)
@@ -272,18 +299,36 @@ export const DatabaseService = {
     // --- Play History ---
 
     // Record a play event
-    async recordPlay(trackId: string, playDurationMs?: number, completedPlay: boolean = false) {
+    async recordPlay(track: Track, source: 'local' | 'jellyfin', playDurationMs?: number, completedPlay: boolean = false) {
+        const id = generateId();
+
+        // For Jellyfin tracks, cache the metadata so it can be viewed in Most Played later without fetching
+        if (source === 'jellyfin') {
+            await db.insert(cachedTracks).values({
+                id: track.id,
+                trackDataJson: JSON.stringify(track),
+                updatedAt: new Date(),
+            }).onConflictDoUpdate({
+                target: cachedTracks.id,
+                set: {
+                    trackDataJson: JSON.stringify(track),
+                    updatedAt: new Date(),
+                }
+            });
+        }
+
         await db.insert(playHistory).values({
-            id: generateId(),
-            trackId,
+            id,
+            trackId: track.id,
             playedAt: new Date(),
             playDurationMs,
             completedPlay,
+            source,
         });
     },
 
     // Get most played tracks (with play count)
-    async getMostPlayed(limit: number = 10) {
+    async getMostPlayed(source: 'local' | 'jellyfin', limit: number = 10) {
         try {
             // Group by trackId, count plays, order by count desc
             const result = await db.select({
@@ -291,6 +336,7 @@ export const DatabaseService = {
                 playCount: count(),
             })
                 .from(playHistory)
+                .where(eq(playHistory.source, source))
                 .groupBy(playHistory.trackId)
                 .orderBy(desc(count()))
                 .limit(limit);
@@ -300,8 +346,21 @@ export const DatabaseService = {
             // Fetch full track details for each
             const tracksWithCount = await Promise.all(
                 result.map(async (r) => {
-                    const track = await db.select().from(tracks).where(eq(tracks.id, r.trackId)).limit(1);
-                    return track[0] ? { ...track[0], playCount: r.playCount } : null;
+                    let trackObj: any = null;
+                    if (source === 'local') {
+                        const track = await db.select().from(tracks).where(eq(tracks.id, r.trackId)).limit(1);
+                        trackObj = track[0] || null;
+                    } else {
+                        const cached = await db.select().from(cachedTracks).where(eq(cachedTracks.id, r.trackId)).limit(1);
+                        if (cached && cached[0]) {
+                            try {
+                                trackObj = JSON.parse(cached[0].trackDataJson);
+                            } catch (e) {
+                                console.error('Failed to parse cached track data', e);
+                            }
+                        }
+                    }
+                    return trackObj ? { ...trackObj, playCount: r.playCount } : null;
                 })
             );
 
@@ -313,7 +372,7 @@ export const DatabaseService = {
     },
 
     // Get recently played tracks
-    async getRecentlyPlayed(limit: number = 10) {
+    async getRecentlyPlayed(source: 'local' | 'jellyfin', limit: number = 10) {
         try {
             // Get most recent plays, distinct by track
             const result = await db.select({
@@ -321,6 +380,7 @@ export const DatabaseService = {
                 playedAt: playHistory.playedAt,
             })
                 .from(playHistory)
+                .where(eq(playHistory.source, source))
                 .orderBy(desc(playHistory.playedAt))
                 .limit(limit * 3); // Get extra to account for duplicates
 
@@ -337,8 +397,21 @@ export const DatabaseService = {
             // Fetch full track details
             const tracksWithTime = await Promise.all(
                 uniquePlays.map(async (r) => {
-                    const track = await db.select().from(tracks).where(eq(tracks.id, r.trackId)).limit(1);
-                    return track[0] ? { ...track[0], playedAt: r.playedAt } : null;
+                    let trackObj: any = null;
+                    if (source === 'local') {
+                        const track = await db.select().from(tracks).where(eq(tracks.id, r.trackId)).limit(1);
+                        trackObj = track[0] || null;
+                    } else {
+                        const cached = await db.select().from(cachedTracks).where(eq(cachedTracks.id, r.trackId)).limit(1);
+                        if (cached && cached[0]) {
+                            try {
+                                trackObj = JSON.parse(cached[0].trackDataJson);
+                            } catch (e) {
+                                console.error('Failed to parse cached track data', e);
+                            }
+                        }
+                    }
+                    return trackObj ? { ...trackObj, playedAt: r.playedAt } : null;
                 })
             );
 

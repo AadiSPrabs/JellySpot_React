@@ -1,10 +1,12 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { View, StyleSheet, FlatList, Image, TouchableOpacity, Pressable } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, useTheme, IconButton, ProgressBar, Button, Surface } from 'react-native-paper';
 import { useDownloadStore, Download, DownloadStatus } from '../store/downloadStore';
 import { downloadService } from '../services/DownloadService';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { EmptyState } from '../components/EmptyState';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 
 interface AlbumGroup {
     album: string;
@@ -16,10 +18,17 @@ export default function DownloadsScreen() {
     const theme = useTheme();
     const { downloads, loadDownloads, removeDownload, clearCompleted, retryDownload, cancelAllPending } = useDownloadStore();
     const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
     useEffect(() => {
         loadDownloads();
     }, []);
+
+    const onRefresh = useCallback(async () => {
+        setIsRefreshing(true);
+        await loadDownloads();
+        setIsRefreshing(false);
+    }, [loadDownloads]);
 
     // Separate downloads by status
     const activeDownloads = downloads.filter(d => d.status === 'downloading' || d.status === 'pending');
@@ -256,15 +265,11 @@ export default function DownloadsScreen() {
             </View>
 
             {isEmpty ? (
-                <View style={styles.emptyState}>
-                    <Icon name="download-off" size={64} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.5 }} />
-                    <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginTop: 16 }}>
-                        No downloads yet
-                    </Text>
-                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', marginTop: 8, paddingHorizontal: 40 }}>
-                        Download songs from your Jellyfin server to listen offline
-                    </Text>
-                </View>
+                <EmptyState
+                    icon="download-off"
+                    title="No downloads yet"
+                    description="Download songs from your Jellyfin server to listen offline"
+                />
             ) : (
                 <FlatList
                     data={[
@@ -300,6 +305,13 @@ export default function DownloadsScreen() {
                     }}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={isRefreshing}
+                            onRefresh={onRefresh}
+                            colors={[theme.colors.primary]}
+                        />
+                    }
                 />
             )}
         </SafeAreaView>

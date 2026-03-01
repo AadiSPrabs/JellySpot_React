@@ -1,19 +1,69 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const createApiClient = () => {
+// Unique device ID (generated once, persisted forever)
+let cachedDeviceId: string | null = null;
+
+const getDeviceId = async (): Promise<string> => {
+    if (cachedDeviceId) return cachedDeviceId;
+    try {
+        const stored = await AsyncStorage.getItem('jellyspot-device-id');
+        if (stored) {
+            cachedDeviceId = stored;
+            return stored;
+        }
+    } catch { }
+    // Generate a new UUID
+    const id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+    });
+    cachedDeviceId = id;
+    AsyncStorage.setItem('jellyspot-device-id', id).catch(() => { });
+    return id;
+};
+
+// Synchronous getter for the device ID (uses cached value, falls back to sync init)
+const getDeviceIdSync = (): string => {
+    return cachedDeviceId || 'jellyspot-mobile';
+};
+
+// Initialize device ID eagerly at module load
+getDeviceId();
+
+const getAuthHeader = (token?: string): string => {
+    const deviceId = getDeviceIdSync();
+    return `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="${deviceId}", Version="1.0.0"${token ? `, Token="${token}"` : ''}`;
+};
+
+// Module-level singleton Axios instance
+let apiClient: ReturnType<typeof axios.create> | null = null;
+let lastServerUrl: string | null = null;
+let lastToken: string | null = null;
+
+const getApiClient = () => {
     const { serverUrl, user } = useAuthStore.getState();
+    const token = user?.token || '';
 
-    const api = axios.create({
+    // Reuse existing client if auth state hasn't changed
+    if (apiClient && lastServerUrl === serverUrl && lastToken === token) {
+        return apiClient;
+    }
+
+    apiClient = axios.create({
         baseURL: serverUrl || '',
         headers: {
-            'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0", Token="${user?.token || ''}"`,
+            'X-Emby-Authorization': getAuthHeader(token),
         },
     });
+    lastServerUrl = serverUrl;
+    lastToken = token;
 
-    return api;
+    return apiClient;
 };
+
 
 // Helper to get selected library IDs or undefined if all libraries should be used
 const getSelectedParentIds = (): string | undefined => {
@@ -32,7 +82,7 @@ export const jellyfinApi = {
             Pw: pw,
         }, {
             headers: {
-                'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0"`,
+                'X-Emby-Authorization': getAuthHeader(),
             }
         });
         return response.data;
@@ -42,7 +92,7 @@ export const jellyfinApi = {
         const { serverUrl } = useAuthStore.getState();
         const response = await axios.get(`${serverUrl}/Users/${userId}`, {
             headers: {
-                'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0", Token="${token}"`
+                'X-Emby-Authorization': getAuthHeader(token)
             },
             timeout: 5000
         });
@@ -53,7 +103,7 @@ export const jellyfinApi = {
         const { serverUrl } = useAuthStore.getState();
         const response = await axios.get(`${serverUrl}/Users/Me`, {
             headers: {
-                'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0", Token="${token}"`
+                'X-Emby-Authorization': getAuthHeader(token)
             },
             timeout: 5000
         });
@@ -66,7 +116,7 @@ export const jellyfinApi = {
     },
 
     getUserViews: async () => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Views`, { timeout: 10000 });
         return response.data;
@@ -74,7 +124,7 @@ export const jellyfinApi = {
 
     // Get only music libraries from user views
     getMusicLibraries: async () => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Views`, { timeout: 10000 });
         const views = response.data?.Items || [];
@@ -87,7 +137,7 @@ export const jellyfinApi = {
     },
 
     getLatestMusic: async (limit = 20) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const { selectedJellyfinLibraries } = useSettingsStore.getState();
         // Latest endpoint works better with a single ParentId, so use first selected library or none
@@ -107,7 +157,7 @@ export const jellyfinApi = {
     },
 
     getResumeItems: async (limit = 10) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Items/Resume`, {
             params: {
@@ -124,7 +174,7 @@ export const jellyfinApi = {
     },
 
     getItems: async (params: any) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const parentIds = getSelectedParentIds();
         const response = await api.get(`/Users/${user?.id}/Items`, {
@@ -141,7 +191,7 @@ export const jellyfinApi = {
     },
 
     getItem: async (itemId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Items/${itemId}`, {
             params: {
@@ -163,7 +213,7 @@ export const jellyfinApi = {
     },
 
     searchItems: async (query: string, includeItemTypes: string = 'Audio,MusicAlbum,MusicArtist') => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const parentIds = getSelectedParentIds();
         const response = await api.get(`/Users/${user?.id}/Items`, {
@@ -182,7 +232,7 @@ export const jellyfinApi = {
 
     // Restored Methods
     getRecommendations: async (limit = 20) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const parentIds = getSelectedParentIds();
         // Use random items as robust "Quick Picks" instead of Suggestions
@@ -202,7 +252,7 @@ export const jellyfinApi = {
     },
 
     getPlaylists: async () => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Items`, {
             params: {
@@ -216,7 +266,7 @@ export const jellyfinApi = {
     },
 
     getPlaylistItems: async (playlistId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         // Correct endpoint per Jellyfin API docs: /Playlists/{playlistId}/Items
         const response = await api.get(`/Playlists/${playlistId}/Items`, {
@@ -230,7 +280,7 @@ export const jellyfinApi = {
     },
 
     getGenres: async (limit = 20) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Genres`, {
             params: {
@@ -248,28 +298,28 @@ export const jellyfinApi = {
     },
 
     getArtist: async (artistId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Items/${artistId}`, { timeout: 20000 });
         return response.data;
     },
 
     getAlbum: async (albumId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Items/${albumId}`, { timeout: 20000 });
         return response.data;
     },
 
     markFavorite: async (itemId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.post(`/Users/${user?.id}/FavoriteItems/${itemId}`);
         return response.data;
     },
 
     unmarkFavorite: async (itemId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.delete(`/Users/${user?.id}/FavoriteItems/${itemId}`);
         return response.data;
@@ -277,13 +327,13 @@ export const jellyfinApi = {
 
     // Delete an item (playlist, etc.) from the server
     deleteItem: async (itemId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const response = await api.delete(`/Items/${itemId}`);
         return response.data;
     },
 
     getSimilarItems: async (itemId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Items/${itemId}/Similar`, {
             params: {
@@ -296,7 +346,7 @@ export const jellyfinApi = {
     },
 
     getAudioLyrics: async (itemId: string) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
 
         // Strategy 1: Try the dedicated Lyrics endpoint (Jellyfin 10.9+)
@@ -354,7 +404,7 @@ export const jellyfinApi = {
 
     // Quick Connect
     getRecommendedArtists: async (limit = 10) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.get(`/Users/${user?.id}/Items`, {
             params: {
@@ -372,7 +422,7 @@ export const jellyfinApi = {
 
 
     createPlaylist: async (name: string, ids?: string[]) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.post('/Playlists', {
             Name: name,
@@ -384,7 +434,7 @@ export const jellyfinApi = {
     },
 
     addToPlaylist: async (playlistId: string, itemIds: string[]) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.post(`/Playlists/${playlistId}/Items`, {}, {
             params: {
@@ -396,7 +446,7 @@ export const jellyfinApi = {
     },
 
     removeFromPlaylist: async (playlistId: string, itemIds: string[]) => {
-        const api = createApiClient();
+        const api = getApiClient();
         const { user } = useAuthStore.getState();
         const response = await api.delete(`/Playlists/${playlistId}/Items`, {
             params: {
@@ -412,7 +462,7 @@ export const jellyfinApi = {
         if (!serverUrl) throw new Error("Server URL not set");
 
         const headers = {
-            'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0"`
+            'X-Emby-Authorization': getAuthHeader()
         };
 
         const response = await axios.post(`${serverUrl}/QuickConnect/Initiate`, {}, { headers, timeout: 10000 });
@@ -424,7 +474,7 @@ export const jellyfinApi = {
         if (!serverUrl) throw new Error("Server URL not set");
 
         const headers = {
-            'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0"`
+            'X-Emby-Authorization': getAuthHeader()
         };
 
         // This endpoint returns 200 { Authenticated: true } if authorized
@@ -440,7 +490,7 @@ export const jellyfinApi = {
     authenticateWithQuickConnect: async (secret: string) => {
         const { serverUrl } = useAuthStore.getState();
         const headers = {
-            'X-Emby-Authorization': `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="jellyspot-mobile", Version="1.0.0"`
+            'X-Emby-Authorization': getAuthHeader()
         };
 
         // Exchange the validated secret for an access token

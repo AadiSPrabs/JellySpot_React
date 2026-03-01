@@ -1,11 +1,13 @@
 import React, { useRef, useEffect } from 'react';
-import { View, StyleSheet, Animated, Dimensions, TouchableOpacity, PanResponder, Image, Text as RNText } from 'react-native';
+import { View, StyleSheet, Animated, Dimensions, TouchableOpacity, PanResponder, Text as RNText } from 'react-native';
+import { Image } from 'expo-image';
 import { Text, useTheme } from 'react-native-paper';
 import { usePlayerStore } from '../store/playerStore';
 import { useShallow } from 'zustand/react/shallow';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -43,9 +45,14 @@ const QueueItem = React.memo(({
             isActive && { backgroundColor: `${themeActiveColor}30` }
         ]}
         onPress={() => onPress(item)}
-        onLongPress={drag}
+        onLongPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            drag();
+        }}
         delayLongPress={150}
         activeOpacity={0.6}
+        accessibilityRole="button"
+        accessibilityLabel={`Play ${item.name} by ${item.artist}${isCurrent ? ', currently playing' : ''}. Double tap and hold to reorder.`}
     >
         {/* Drag handle */}
         <View style={styles.dragHandleContainer}>
@@ -89,14 +96,16 @@ const QueueItem = React.memo(({
         {/* Delete button */}
         <TouchableOpacity
             style={styles.deleteButton}
-            onPress={() => onRemove(item.id)}
+            onPress={() => onRemove(item.queueItemId || item.id)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${item.name} from queue`}
         >
             <Icon name="close" size={20} color={theme.colors.onSurfaceVariant} />
         </TouchableOpacity>
     </TouchableOpacity>
 ), (prev, next) => (
-    prev.item.id === next.item.id &&
+    (prev.item.queueItemId === next.item.queueItemId || prev.item.id === next.item.id) &&
     prev.isActive === next.isActive &&
     prev.isCurrent === next.isCurrent
 ));
@@ -110,6 +119,7 @@ export default function QueueBottomSheet({
     const theme = useTheme();
     const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
     const isClosingRef = useRef(false);
+    const listRef = useRef<any>(null);
 
     const { queue, currentTrack, isPlaying, playTrack, reorderQueue, removeFromQueue, clearQueue } = usePlayerStore(useShallow(state => ({
         queue: state.queue,
@@ -133,8 +143,23 @@ export default function QueueBottomSheet({
                 tension: 65,
                 friction: 11,
             }).start();
+
+            // Scroll to current track after animation starts
+            if (currentTrack && queue.length > 0) {
+                const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+                if (currentIndex >= 0 && listRef.current) {
+                    // Small timeout to ensure list layout happens first
+                    setTimeout(() => {
+                        listRef.current?.scrollToIndex({
+                            index: currentIndex,
+                            animated: false,
+                            viewPosition: 0.1 // Shows a bit of the previous track for context
+                        });
+                    }, 50);
+                }
+            }
         }
-    }, [visible]);
+    }, [visible, currentTrack, queue]);
 
     // Smooth close animation - animates fully then calls onClose
     const animateClose = () => {
@@ -197,17 +222,23 @@ export default function QueueBottomSheet({
                 themeActiveColor={themeActiveColor}
                 theme={theme}
                 onPress={playTrack}
-                onRemove={removeFromQueue}
+                onRemove={removeFromQueue} // QueueItem needs to pass the queueItemId now
             />
         );
     }, [currentTrack?.id, themeActiveColor, theme, playTrack, removeFromQueue]);
 
-    const keyExtractor = React.useCallback((item: any, index: number) => `${item.id}-${index}`, []);
+    const keyExtractor = React.useCallback((item: any, index: number) => item.queueItemId || `${item.id}-${index}`, []);
 
-    if (!visible) return null;
+    const hasRenderedRef = useRef(false);
+    if (visible && !hasRenderedRef.current) {
+        hasRenderedRef.current = true;
+    }
+
+    if (!hasRenderedRef.current) return null;
 
     return (
         <Animated.View
+            pointerEvents={visible ? 'auto' : 'none'}
             style={[
                 styles.container,
                 {
@@ -228,21 +259,23 @@ export default function QueueBottomSheet({
             <View style={{ flex: 1, overflow: 'hidden' }}>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                     <DraggableFlatList
+                        ref={listRef}
                         data={queue}
                         renderItem={renderItem}
                         keyExtractor={keyExtractor}
                         onDragEnd={handleDragEnd}
                         contentContainerStyle={styles.listContent}
                         showsVerticalScrollIndicator={false}
-                        initialNumToRender={12}
-                        maxToRenderPerBatch={6}
-                        windowSize={5}
-                        removeClippedSubviews={false}
+                        initialNumToRender={10}
+                        maxToRenderPerBatch={8}
+                        updateCellsBatchingPeriod={50}
+                        windowSize={11}
+                        removeClippedSubviews={true}
                         getItemLayout={(data, index) => ({ length: 64, offset: 64 * index, index })}
                         activationDistance={10}
                         autoscrollThreshold={60}
                         autoscrollSpeed={150}
-                        dragItemOverflow={true}
+                        dragItemOverflow={false} // Overflow can cause layout thrashing
                     />
                 </GestureHandlerRootView>
             </View>
@@ -252,6 +285,8 @@ export default function QueueBottomSheet({
                 <TouchableOpacity
                     style={[styles.clearButton, { borderColor: theme.colors.error }]}
                     onPress={clearQueue}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear entire queue"
                 >
                     <Icon name="playlist-remove" size={18} color={theme.colors.error} />
                     <RNText style={[styles.clearButtonText, { color: theme.colors.error }]}>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Image, ScrollView, Dimensions, Keyboard, SectionList, useWindowDimensions, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, ScrollView, Dimensions, Keyboard, SectionList, useWindowDimensions, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, TouchableRipple, Surface, Chip, ActivityIndicator } from 'react-native-paper';
 import { jellyfinApi } from '../api/jellyfin';
@@ -14,6 +15,9 @@ import { SearchStackParamList } from '../types/navigation';
 import { Loader } from '../components/Loader';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { EmptyState } from '../components/EmptyState';
+import { SearchSkeleton } from '../components/Skeleton';
 
 // Predefined colors for genre cards to make them pop properly like Spotify
 const GENRE_COLORS = [
@@ -49,6 +53,7 @@ export default function SearchScreen() {
     const [loading, setLoading] = useState(false);
     const [genresLoading, setGenresLoading] = useState(true);
     const [filter, setFilter] = useState<'All' | 'Songs' | 'Artists' | 'Albums'>('All');
+    const [searchHistory, setSearchHistory] = useState<string[]>([]);
 
     const searchInputRef = useRef<TextInput>(null);
 
@@ -81,6 +86,10 @@ export default function SearchScreen() {
 
     useEffect(() => {
         loadGenres();
+        // Load search history on mount
+        AsyncStorage.getItem('search_history').then(res => {
+            if (res) setSearchHistory(JSON.parse(res));
+        }).catch(err => console.error('Failed to load search history', err));
     }, [sourceMode, localLibrary.tracks, localLibrary.selectedFolderPaths]); // Re-fetch when tracks or folder selection changes
 
     useEffect(() => {
@@ -194,7 +203,7 @@ export default function SearchScreen() {
             if (filter === 'All' || filter === 'Artists') {
                 const artists = await DatabaseService.searchArtists(searchQuery);
                 const matchingArtists = artists.map((a: any) => ({
-                    Id: `local_artist_${a.artist.toLowerCase().replace(/\s+/g, '_')}`,
+                    Id: a.artistId || a.artist, // Use real artistId from DB
                     Name: a.artist,
                     Type: 'MusicArtist',
                     imageUrl: a.imageUrl,
@@ -207,7 +216,7 @@ export default function SearchScreen() {
             if (filter === 'All' || filter === 'Albums') {
                 const albums = await DatabaseService.searchAlbums(searchQuery);
                 const matchingAlbums = albums.map((a: any) => ({
-                    Id: `local_album_${a.album.toLowerCase().replace(/\s+/g, '_')}`,
+                    Id: a.album, // Use real album name
                     Name: a.album,
                     Type: 'MusicAlbum',
                     AlbumArtist: a.artist,
@@ -234,8 +243,28 @@ export default function SearchScreen() {
         return data.Items || [];
     };
 
+    const saveToHistory = async (newQuery: string) => {
+        if (!newQuery.trim()) return;
+        try {
+            const queryLower = newQuery.trim();
+            // Remove if exists and push to top
+            let newHistory = searchHistory.filter(q => q.toLowerCase() !== queryLower.toLowerCase());
+            newHistory = [newQuery.trim(), ...newHistory].slice(0, 10);
+            setSearchHistory(newHistory);
+            await AsyncStorage.setItem('search_history', JSON.stringify(newHistory));
+        } catch (e) {
+            console.error('Failed to save search history', e);
+        }
+    };
+
+    const clearHistory = async () => {
+        setSearchHistory([]);
+        await AsyncStorage.removeItem('search_history');
+    };
+
     const performSearch = async () => {
         setLoading(true);
+        saveToHistory(query);
         try {
             // Clear previous results
             setLocalResults([]);
@@ -425,12 +454,32 @@ export default function SearchScreen() {
 
                 {/* Main Content */}
                 {loading ? (
-                    <View style={styles.centerContainer}>
-                        <ActivityIndicator size="large" color={theme.colors.primary} />
-                    </View>
+                    <SearchSkeleton />
                 ) : query.length === 0 ? (
-                    /* Empty State: Browse Categories */
+                    /* Empty State: Browse Categories & History */
                     <View style={styles.browseContainer}>
+                        {searchHistory.length > 0 && (
+                            <View style={{ marginBottom: 24 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                    <Text style={[styles.sectionTitle, { color: theme.colors.onSurface, marginBottom: 0 }]}>Recent Searches</Text>
+                                    <TouchableOpacity onPress={clearHistory}>
+                                        <Text style={{ color: theme.colors.primary, fontSize: 14 }}>Clear</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                    {searchHistory.map(h => (
+                                        <Chip
+                                            key={h}
+                                            onPress={() => setQuery(h)}
+                                            style={{ backgroundColor: theme.colors.surfaceVariant }}
+                                            textStyle={{ color: theme.colors.onSurfaceVariant }}
+                                        >
+                                            {h}
+                                        </Chip>
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        )}
                         <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>Browse All</Text>
                         {genresLoading ? (
                             <ActivityIndicator style={{ marginTop: 20 }} color={theme.colors.primary} />
@@ -451,15 +500,11 @@ export default function SearchScreen() {
                             />
                         ) : (
                             // Show search prompt if no genres found
-                            <View style={styles.centerContainer}>
-                                <SearchIcon color={theme.colors.onSurfaceVariant} size={48} style={{ marginBottom: 16, opacity: 0.5 }} />
-                                <Text style={{ color: theme.colors.onSurface, fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>
-                                    Search Your Library
-                                </Text>
-                                <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', paddingHorizontal: 40 }}>
-                                    Start typing to find songs, artists, and albums
-                                </Text>
-                            </View>
+                            <EmptyState
+                                icon="magnify"
+                                title="Search Your Library"
+                                description="Start typing to find songs, artists, and albums"
+                            />
                         )}
                     </View>
                 ) : (
@@ -480,9 +525,11 @@ export default function SearchScreen() {
 
                         if (sections.length === 0) {
                             return (
-                                <View style={styles.centerContainer}>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>No results found.</Text>
-                                </View>
+                                <EmptyState
+                                    icon="text-search"
+                                    title="No results found"
+                                    description={`We couldn't find anything matching "${query}"`}
+                                />
                             );
                         }
 
@@ -503,6 +550,10 @@ export default function SearchScreen() {
                                 contentContainerStyle={[styles.resultList, { paddingBottom: 180 }]}
                                 showsVerticalScrollIndicator={false}
                                 stickySectionHeadersEnabled={true}
+                                removeClippedSubviews={true}
+                                initialNumToRender={10}
+                                maxToRenderPerBatch={10}
+                                windowSize={5}
                             />
                         );
                     })()

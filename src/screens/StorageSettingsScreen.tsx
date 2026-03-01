@@ -5,7 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { Folder, Music, FolderCheck } from 'lucide-react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import SettingsGroup from '../components/SettingsGroup';
 
 // Storage stats interface
 interface StorageStats {
@@ -77,7 +78,7 @@ export default function StorageSettingsScreen() {
                         if (!uri.startsWith('file://') && uri.startsWith('/')) {
                             uri = 'file://' + uri;
                         }
-                        const info = await FileSystem.getInfoAsync(uri, { size: true });
+                        const info = await FileSystem.getInfoAsync(uri);
                         if (info.exists && 'size' in info && info.size) {
                             audioSize += info.size;
                             tracksWithSize++;
@@ -104,7 +105,7 @@ export default function StorageSettingsScreen() {
                 if (artworkDirInfo.exists) {
                     const files = await FileSystem.readDirectoryAsync(artworkCacheDir);
                     for (const file of files) {
-                        const fileInfo = await FileSystem.getInfoAsync(artworkCacheDir + file, { size: true });
+                        const fileInfo = await FileSystem.getInfoAsync(artworkCacheDir + file);
                         if (fileInfo.exists && 'size' in fileInfo && fileInfo.size) {
                             artworkSize += fileInfo.size;
                         }
@@ -120,7 +121,7 @@ export default function StorageSettingsScreen() {
             let metadataSize = 0;
             const dbPath = FileSystem.documentDirectory + 'SQLite/jellyspot.db';
             try {
-                const dbInfo = await FileSystem.getInfoAsync(dbPath, { size: true });
+                const dbInfo = await FileSystem.getInfoAsync(dbPath);
                 if (dbInfo.exists && 'size' in dbInfo && dbInfo.size) {
                     metadataSize = dbInfo.size;
                 }
@@ -137,7 +138,7 @@ export default function StorageSettingsScreen() {
                     const files = await FileSystem.readDirectoryAsync(cacheDir);
                     for (const file of files.slice(0, 50)) { // Sample first 50 files for performance
                         try {
-                            const fileInfo = await FileSystem.getInfoAsync(cacheDir + file, { size: true });
+                            const fileInfo = await FileSystem.getInfoAsync(cacheDir + file);
                             if (fileInfo.exists && 'size' in fileInfo && fileInfo.size) {
                                 cacheSize += fileInfo.size;
                             }
@@ -197,130 +198,110 @@ export default function StorageSettingsScreen() {
             <ScrollView contentContainerStyle={styles.content}>
                 {/* Permission Section */}
                 {!permissionGranted && (
-                    <Surface style={[styles.card, { backgroundColor: theme.colors.elevation.level1 }]} elevation={1}>
-                        <View style={styles.cardHeader}>
-                            <Folder size={24} color={theme.colors.primary} />
-                            <Text variant="titleMedium" style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
-                                Grant Access
+                    <SettingsGroup title="Grant Access">
+                        <View style={{ padding: 16 }}>
+                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 16 }}>
+                                Jellyspot needs permission to access your device's audio files.
                             </Text>
+
+                            <Button
+                                mode="contained"
+                                onPress={handleGrantPermission}
+                                icon="folder-open"
+                                style={styles.button}
+                            >
+                                Grant Permission
+                            </Button>
                         </View>
-
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 16 }}>
-                            Jellyspot needs permission to access your device's audio files.
-                        </Text>
-
-                        <Button
-                            mode="contained"
-                            onPress={handleGrantPermission}
-                            icon="folder-open"
-                            style={styles.button}
-                        >
-                            Grant Permission
-                        </Button>
-                    </Surface>
+                    </SettingsGroup>
                 )}
 
-                {!permissionGranted && <Divider style={{ marginVertical: 16 }} />}
-
                 {/* Library Status Section */}
-                <Surface style={[styles.card, { backgroundColor: theme.colors.elevation.level1 }]} elevation={1}>
-                    <View style={styles.cardHeader}>
-                        <Music size={24} color={theme.colors.secondary} />
-                        <Text variant="titleMedium" style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
-                            Library Status
-                        </Text>
-                    </View>
-
-                    <View style={styles.statsRow}>
-                        <View style={[styles.stat, { marginRight: 24 }]}>
-                            <Text variant="headlineMedium" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>
-                                {tracks.length}
-                            </Text>
-                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                Total Songs
-                            </Text>
-                        </View>
-                        <View style={[styles.stat, { marginRight: 24 }]}>
-                            <Text variant="headlineMedium" style={{ color: theme.colors.secondary, fontWeight: 'bold' }}>
-                                {filteredTracksCount}
-                            </Text>
-                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                In Library
-                            </Text>
-                        </View>
-                        <View style={styles.stat}>
-                            <Text variant="headlineMedium" style={{ color: theme.colors.tertiary, fontWeight: 'bold' }}>
-                                {availableFolders.length}
-                            </Text>
-                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                Folders
-                            </Text>
-                        </View>
-                    </View>
-
-                    {isEnriching && (
-                        <View style={{ marginBottom: 12 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                <ActivityIndicator size="small" color={theme.colors.tertiary} />
-                                <Text variant="bodySmall" style={{ marginLeft: 8, color: theme.colors.onSurfaceVariant }}>
-                                    Extracting metadata... {enrichProgress}%
+                <SettingsGroup title="Library Status">
+                    <View style={{ padding: 16 }}>
+                        <View style={styles.statsRow}>
+                            <View style={[styles.stat, { marginRight: 24 }]}>
+                                <Text variant="headlineMedium" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>
+                                    {tracks.length}
+                                </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Total Songs
                                 </Text>
                             </View>
-                            <View style={{ height: 4, backgroundColor: theme.colors.surfaceVariant, borderRadius: 2 }}>
-                                <View style={{
-                                    height: 4,
-                                    width: `${enrichProgress}%`,
-                                    backgroundColor: theme.colors.tertiary,
-                                    borderRadius: 2
-                                }} />
-                            </View>
-                        </View>
-                    )}
-
-                    {isScanning && (
-                        <View style={{ marginTop: 12 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                <ActivityIndicator size="small" color={theme.colors.primary} />
-                                <Text variant="bodySmall" style={{ marginLeft: 8, color: theme.colors.onSurfaceVariant }}>
-                                    Scanning library... {scanProgress}%
+                            <View style={[styles.stat, { marginRight: 24 }]}>
+                                <Text variant="headlineMedium" style={{ color: theme.colors.secondary, fontWeight: 'bold' }}>
+                                    {filteredTracksCount}
+                                </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    In Library
                                 </Text>
                             </View>
-                            <View style={{ height: 4, backgroundColor: theme.colors.surfaceVariant, borderRadius: 2 }}>
-                                <View style={{
-                                    height: 4,
-                                    width: `${scanProgress}%`,
-                                    backgroundColor: theme.colors.primary,
-                                    borderRadius: 2
-                                }} />
+                            <View style={styles.stat}>
+                                <Text variant="headlineMedium" style={{ color: theme.colors.tertiary, fontWeight: 'bold' }}>
+                                    {availableFolders.length}
+                                </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Folders
+                                </Text>
                             </View>
                         </View>
-                    )}
 
-                    {/* Refresh Library Button */}
-                    {permissionGranted && !isScanning && (
-                        <Button
-                            mode="outlined"
-                            onPress={() => refreshLibrary()}
-                            icon="refresh"
-                            style={{ marginTop: 16 }}
-                        >
-                            Refresh Library
-                        </Button>
-                    )}
-                </Surface>
+                        {isEnriching && (
+                            <View style={{ marginBottom: 12 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                    <ActivityIndicator size="small" color={theme.colors.tertiary} />
+                                    <Text variant="bodySmall" style={{ marginLeft: 8, color: theme.colors.onSurfaceVariant }}>
+                                        Extracting metadata... {enrichProgress}%
+                                    </Text>
+                                </View>
+                                <View style={{ height: 4, backgroundColor: theme.colors.surfaceVariant, borderRadius: 2 }}>
+                                    <View style={{
+                                        height: 4,
+                                        width: `${enrichProgress}%`,
+                                        backgroundColor: theme.colors.tertiary,
+                                        borderRadius: 2
+                                    }} />
+                                </View>
+                            </View>
+                        )}
+
+                        {isScanning && (
+                            <View style={{ marginTop: 12 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                    <ActivityIndicator size="small" color={theme.colors.primary} />
+                                    <Text variant="bodySmall" style={{ marginLeft: 8, color: theme.colors.onSurfaceVariant }}>
+                                        Scanning library... {scanProgress}%
+                                    </Text>
+                                </View>
+                                <View style={{ height: 4, backgroundColor: theme.colors.surfaceVariant, borderRadius: 2 }}>
+                                    <View style={{
+                                        height: 4,
+                                        width: `${scanProgress}%`,
+                                        backgroundColor: theme.colors.primary,
+                                        borderRadius: 2
+                                    }} />
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Refresh Library Button */}
+                        {permissionGranted && !isScanning && (
+                            <Button
+                                mode="outlined"
+                                onPress={() => refreshLibrary()}
+                                icon="refresh"
+                                style={{ marginTop: 16 }}
+                            >
+                                Refresh Library
+                            </Button>
+                        )}
+                    </View>
+                </SettingsGroup>
 
                 {/* Storage Analytics Section */}
                 {tracks.length > 0 && (
-                    <>
-                        <Divider style={{ marginVertical: 16 }} />
-                        <Surface style={[styles.card, { backgroundColor: theme.colors.elevation.level1 }]} elevation={1}>
-                            <View style={styles.cardHeader}>
-                                <Folder size={24} color={theme.colors.primary} />
-                                <Text variant="titleMedium" style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
-                                    Storage Analytics
-                                </Text>
-                            </View>
-
+                    <SettingsGroup title="Storage Analytics">
+                        <View style={{ padding: 16 }}>
                             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
                                 {storageStats.isCalculating
                                     ? 'Calculating storage usage...'
@@ -410,22 +391,14 @@ export default function StorageSettingsScreen() {
                                     </>
                                 );
                             })()}
-                        </Surface>
-                    </>
+                        </View>
+                    </SettingsGroup>
                 )}
 
                 {/* Folder Selection Section */}
                 {availableFolders.length > 0 && (
-                    <>
-                        <Divider style={{ marginVertical: 16 }} />
-                        <Surface style={[styles.card, { backgroundColor: theme.colors.elevation.level1 }]} elevation={1}>
-                            <View style={styles.cardHeader}>
-                                <FolderCheck size={24} color={theme.colors.primary} />
-                                <Text variant="titleMedium" style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
-                                    Folder Filter
-                                </Text>
-                            </View>
-
+                    <SettingsGroup title="Folder Filter">
+                        <View style={{ padding: 16 }}>
                             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
                                 Select which folders to include in your library. Only songs from selected folders will appear.
                             </Text>
@@ -483,8 +456,8 @@ export default function StorageSettingsScreen() {
                                     );
                                 })}
                             </View>
-                        </Surface>
-                    </>
+                        </View>
+                    </SettingsGroup>
                 )}
 
                 {/* Help Text */}
@@ -511,21 +484,8 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     content: {
-        padding: 16,
+        paddingVertical: 16,
         paddingBottom: 40,
-    },
-    card: {
-        padding: 20,
-        borderRadius: 16,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    cardTitle: {
-        marginLeft: 12,
-        fontWeight: '600',
     },
     folderDisplay: {
         padding: 12,

@@ -14,7 +14,9 @@ import { DatabaseService } from '../services/DatabaseService';
 import { ShuffleFab } from '../components/ShuffleFab';
 import { Loader } from '../components/Loader';
 import { Skeleton, ListItemSkeleton, CardSkeleton } from '../components/Skeleton';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { EmptyState } from '../components/EmptyState';
+import ActionSheet from '../components/ActionSheet';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
 
 type FilterType = 'playlists' | 'artists' | 'albums';
@@ -66,6 +68,8 @@ export default function LibraryScreen() {
 
         // Prevent selecting special items
         if (id === 'all-songs' || id === 'liked-songs') return;
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
         if (!isSelectionMode) {
             setIsSelectionMode(true);
@@ -415,6 +419,8 @@ export default function LibraryScreen() {
                     { borderRadius: 8, overflow: 'hidden' },
                     isSelected && { backgroundColor: theme.colors.primaryContainer }
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.Name || item.title}${isSelected ? ', selected' : ''}`}
             >
                 <View style={styles.itemRow}>
                     {isSelectionMode && itemId !== 'all-songs' && itemId !== 'liked-songs' && (
@@ -563,16 +569,13 @@ export default function LibraryScreen() {
                 renderSkeleton()
             ) : (
                 dataSource === 'local' && !localLibrary.permissionGranted ? (
-                    <View style={styles.emptyState}>
-                        <Icon name="folder-lock" size={64} color={theme.colors.onSurfaceVariant} style={{ marginBottom: 16, opacity: 0.5 }} />
-                        <Text variant="titleMedium" style={{ marginBottom: 8 }}>Local Library Access</Text>
-                        <Text variant="bodyMedium" style={{ textAlign: 'center', marginBottom: 16, color: theme.colors.onSurfaceVariant }}>
-                            Please grant access to your device's audio files to display your local library.
-                        </Text>
-                        <Button mode="contained" onPress={() => localLibrary.requestPermissions()}>
-                            Grant Permission
-                        </Button>
-                    </View>
+                    <EmptyState
+                        icon="folder-lock"
+                        title="Local Library Access"
+                        description="Please grant access to your device's audio files to display your local library."
+                        actionLabel="Grant Permission"
+                        onAction={() => localLibrary.requestPermissions()}
+                    />
                 ) : (
                     <FlatList
                         key={isLandscape ? `grid-${numColumns}` : 'list'}
@@ -594,59 +597,59 @@ export default function LibraryScreen() {
                         maxToRenderPerBatch={10}
                         windowSize={5}
                         ListEmptyComponent={
-                            <View style={styles.emptyState}>
-                                <Icon name="music-note-off" size={64} color={theme.colors.onSurfaceVariant} style={{ marginBottom: 16, opacity: 0.5 }} />
-                                <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>
-                                    No {activeFilter} found
-                                </Text>
-                                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                                    {activeFilter === 'playlists' ? 'Create a playlist to get started' : 'Add some music to your library'}
-                                </Text>
-                                {dataSource === 'local' && (
-                                    <Button mode="text" onPress={() => localLibrary.refreshLibrary()} style={{ marginTop: 16 }}>
-                                        Rescan Library
-                                    </Button>
-                                )}
-                            </View>
+                            <EmptyState
+                                icon="music-note-off"
+                                title={`No ${activeFilter} found`}
+                                description={activeFilter === 'playlists' ? 'Create a playlist to get started' : 'Add some music to your library'}
+                                actionLabel={dataSource === 'local' ? 'Rescan Library' : undefined}
+                                onAction={dataSource === 'local' ? () => localLibrary.refreshLibrary() : undefined}
+                            />
                         }
                     />
                 )
             )}
 
-            <Portal>
-                <Dialog visible={isDialogVisible} onDismiss={() => setIsDialogVisible(false)}>
-                    <Dialog.Title>New Playlist</Dialog.Title>
-                    <Dialog.Content>
-                        <TextInput
-                            label="Playlist Name"
-                            value={newPlaylistName}
-                            onChangeText={setNewPlaylistName}
-                            mode="outlined"
-                            autoFocus
-                        />
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setIsDialogVisible(false)}>Cancel</Button>
-                        <Button onPress={handleCreatePlaylist} loading={isCreating} disabled={!newPlaylistName.trim() || isCreating}>Create</Button>
-                    </Dialog.Actions>
-                </Dialog>
+            <ActionSheet visible={isDialogVisible} onClose={() => setIsDialogVisible(false)} title="New Playlist" heightPercentage={35}>
+                <View style={{ gap: 16 }}>
+                    <TextInput
+                        label="Playlist Name"
+                        value={newPlaylistName}
+                        onChangeText={setNewPlaylistName}
+                        mode="outlined"
+                        autoFocus
+                    />
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDialogVisible(false)}>Cancel</Button>
+                        <Button
+                            mode="contained"
+                            onPress={handleCreatePlaylist}
+                            loading={isCreating}
+                            disabled={!newPlaylistName.trim() || isCreating}
+                        >Create</Button>
+                    </View>
+                </View>
+            </ActionSheet>
 
-                <Dialog visible={deleteDialogVisible} onDismiss={() => setDeleteDialogVisible(false)}>
-                    <Dialog.Title>Delete {playlistsToDelete.length > 1 ? 'Playlists' : 'Playlist'}?</Dialog.Title>
-                    <Dialog.Content>
-                        <Text variant="bodyMedium">
-                            Are you sure you want to delete {playlistsToDelete.length > 1
-                                ? `these ${playlistsToDelete.length} playlists: ${playlistsToDelete.map(p => p.Name || p.name || p.title).join(', ')}`
-                                : `"${playlistsToDelete[0]?.Name || playlistsToDelete[0]?.name || playlistsToDelete[0]?.title}"`
-                            }? This action cannot be undone.
-                        </Text>
-                    </Dialog.Content>
-                    <Dialog.Actions>
-                        <Button onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
-                        <Button onPress={handleDeletePlaylist} loading={isDeleting} disabled={isDeleting} textColor={theme.colors.error}>Delete</Button>
-                    </Dialog.Actions>
-                </Dialog>
-            </Portal>
+            <ActionSheet visible={deleteDialogVisible} onClose={() => setDeleteDialogVisible(false)} title={`Delete ${playlistsToDelete.length > 1 ? 'Playlists' : 'Playlist'}?`} heightPercentage={35}>
+                <View style={{ gap: 16 }}>
+                    <Text variant="bodyMedium">
+                        Are you sure you want to delete {playlistsToDelete.length > 1
+                            ? `these ${playlistsToDelete.length} playlists: ${playlistsToDelete.map(p => p.Name || p.name || p.title).join(', ')}`
+                            : `"${playlistsToDelete[0]?.Name || playlistsToDelete[0]?.name || playlistsToDelete[0]?.title}"`
+                        }? This action cannot be undone.
+                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
+                        <Button
+                            mode="contained"
+                            buttonColor={theme.colors.error}
+                            onPress={handleDeletePlaylist}
+                            loading={isDeleting}
+                            disabled={isDeleting}
+                        >Delete</Button>
+                    </View>
+                </View>
+            </ActionSheet>
         </SafeAreaView>
     );
 }

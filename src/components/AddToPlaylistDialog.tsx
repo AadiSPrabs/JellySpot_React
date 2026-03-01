@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ScrollView } from 'react-native';
-import { Dialog, Portal, List, Button, Text } from 'react-native-paper';
+import { ScrollView, View } from 'react-native';
+import { List, Button, Text, Snackbar, Portal } from 'react-native-paper';
 import { jellyfinApi } from '../api/jellyfin';
+import ActionSheet from './ActionSheet';
 
 interface AddToPlaylistDialogProps {
     visible: boolean;
@@ -13,6 +14,7 @@ export default function AddToPlaylistDialog({ visible, onDismiss, trackId }: Add
     const [playlists, setPlaylists] = useState<any[]>([]);
     const [isDuplicateDialogVisible, setIsDuplicateDialogVisible] = useState(false);
     const [pendingPlaylistId, setPendingPlaylistId] = useState<string | null>(null);
+    const [snackbarVisible, setSnackbarVisible] = useState(false);
 
     useEffect(() => {
         if (visible) {
@@ -57,6 +59,7 @@ export default function AddToPlaylistDialog({ visible, onDismiss, trackId }: Add
             await jellyfinApi.addToPlaylist(playlistId, [trackId]);
             setIsDuplicateDialogVisible(false);
             setPendingPlaylistId(null);
+            setSnackbarVisible(true);
             onDismiss();
         } catch (error) {
             console.error('Failed to add to playlist:', error);
@@ -64,36 +67,43 @@ export default function AddToPlaylistDialog({ visible, onDismiss, trackId }: Add
     };
 
     return (
-        <Portal>
-            <Dialog visible={visible && !isDuplicateDialogVisible} onDismiss={onDismiss}>
-                <Dialog.Title>Add to Playlist</Dialog.Title>
-                <Dialog.Content>
-                    <ScrollView style={{ maxHeight: 300 }}>
-                        {playlists.map(playlist => (
-                            <List.Item
-                                key={playlist.Id}
-                                title={playlist.Name}
-                                left={props => <List.Icon {...props} icon="playlist-music" />}
-                                onPress={() => handleAddToPlaylist(playlist.Id)}
-                            />
-                        ))}
-                    </ScrollView>
-                </Dialog.Content>
-                <Dialog.Actions>
-                    <Button onPress={onDismiss}>Cancel</Button>
-                </Dialog.Actions>
-            </Dialog>
+        <>
+            <ActionSheet visible={visible && !isDuplicateDialogVisible} onClose={onDismiss} title="Add to Playlist" scrollable>
+                <View style={{ gap: 4 }}>
+                    {playlists.map(playlist => (
+                        <List.Item
+                            key={playlist.Id}
+                            title={playlist.Name}
+                            left={props => <List.Icon {...props} icon="playlist-music" />}
+                            onPress={() => handleAddToPlaylist(playlist.Id)}
+                        />
+                    ))}
+                </View>
+            </ActionSheet>
 
-            <Dialog visible={isDuplicateDialogVisible} onDismiss={() => setIsDuplicateDialogVisible(false)}>
-                <Dialog.Title>Duplicate Song</Dialog.Title>
-                <Dialog.Content>
+            <ActionSheet visible={isDuplicateDialogVisible} onClose={() => setIsDuplicateDialogVisible(false)} title="Duplicate Song" heightPercentage={30}>
+                <View style={{ gap: 16 }}>
                     <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
-                </Dialog.Content>
-                <Dialog.Actions>
-                    <Button onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
-                    <Button onPress={() => pendingPlaylistId && confirmAddToPlaylist(pendingPlaylistId)}>Add Anyway</Button>
-                </Dialog.Actions>
-            </Dialog>
-        </Portal>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button mode="text" onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
+                        <Button mode="contained" onPress={() => pendingPlaylistId && confirmAddToPlaylist(pendingPlaylistId)}>Add Anyway</Button>
+                    </View>
+                </View>
+            </ActionSheet>
+
+            <Portal>
+                <Snackbar
+                    visible={snackbarVisible}
+                    onDismiss={() => setSnackbarVisible(false)}
+                    duration={3000}
+                    action={{
+                        label: 'OK',
+                        onPress: () => setSnackbarVisible(false),
+                    }}
+                >
+                    Successfully added to playlist
+                </Snackbar>
+            </Portal>
+        </>
     );
 }

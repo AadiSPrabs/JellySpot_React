@@ -1,6 +1,6 @@
 // Artwork caching utility - saves base64 artwork to file system
 // This allows artwork to be used in notifications and persisted across restarts
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Directory for cached artwork
 const ARTWORK_CACHE_DIR = `${FileSystem.cacheDirectory}artwork/`;

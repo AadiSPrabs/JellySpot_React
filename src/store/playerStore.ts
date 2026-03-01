@@ -7,29 +7,11 @@ import { jellyfinApi } from '../api/jellyfin';
 import { DatabaseService } from '../services/DatabaseService';
 import * as Network from 'expo-network';
 import { AppState } from 'react-native';
+import { Track } from '../types/track';
 
-export interface Track {
-    id: string;
-    name: string;
-    artist: string;
-    album: string;
-    imageUrl: string;
-    imageBlurHash?: string;
-    durationMillis: number;
-    streamUrl: string;
-    isFavorite?: boolean;
-    // Technical details
-    bitrate?: number;
-    codec?: string;
-    container?: string;
-    sampleRate?: number;
-    // Playlist context
-    playlistId?: string;
-    playlistItemId?: string;
-    artistId?: string;
-    // Lyrics for local tracks
-    lyrics?: string;
-}
+// Re-export Track for consumers already importing from playerStore
+export type { Track } from '../types/track';
+
 
 interface PlayerState {
     currentTrack: Track | null;
@@ -53,8 +35,8 @@ interface PlayerState {
     toggleRepeat: () => void;
     updateTrackFavorite: (trackId: string, isFavorite: boolean) => void;
     reset: () => void;
-    sleepTimerTarget: number | null;
-    setSleepTimer: (minutes: number | null) => void;
+    sleepTimerTarget: number | 'endOfTrack' | null;
+    setSleepTimer: (minutes: number | 'endOfTrack' | null) => void;
     playbackError: string | null;
     clearPlaybackError: () => void;
     // Queue manipulation
@@ -62,6 +44,8 @@ interface PlayerState {
     removeFromQueue: (trackId: string) => void;
     clearQueue: () => void;
     toggleCurrentTrackFavorite: () => Promise<void>;
+    isPlayerExpanded: boolean;
+    setPlayerExpanded: (expanded: boolean) => void;
 }
 
 // Network state cache for battery optimization (30-second TTL)
@@ -155,6 +139,9 @@ const persistQueueState = () => {
         persistTimer = null;
     }, 2000); // Debounce: save 2s after last change
 };
+// Guard against duplicate init() calls (e.g., HMR)
+let isInitialized = false;
+let listenerCleanups: (() => void)[] = [];
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
     currentTrack: null,
@@ -168,29 +155,47 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     sleepTimerTarget: null,
     playbackError: null,
     clearPlaybackError: () => set({ playbackError: null }),
+    isPlayerExpanded: false,
+    setPlayerExpanded: (expanded: boolean) => set({ isPlayerExpanded: expanded }),
 
     // Initialize listeners
     init: async () => {
+        // Clean up previous listeners if re-initializing
+        if (isInitialized) {
+            listenerCleanups.forEach(cleanup => cleanup());
+            listenerCleanups = [];
+        }
+        isInitialized = true;
+
         const { playNext } = get();
         // Import TrackPlayer to set up listeners
         const TrackPlayer = require('react-native-track-player').default;
         const { Event } = require('react-native-track-player');
 
-        TrackPlayer.addEventListener(Event.PlaybackError, (error: any) => {
+        const sub1 = TrackPlayer.addEventListener(Event.PlaybackError, (error: any) => {
             console.warn('[PlayerStore] Playback Error:', error);
             set({ playbackError: error.message || 'Playback failed' });
         });
+        listenerCleanups.push(() => sub1.remove());
 
-        TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+        const sub2 = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
             // Fallback: Queue ended, playing next
             playNext();
         });
+        listenerCleanups.push(() => sub2.remove());
 
-        TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (event: any) => {
+        const sub3 = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (event: any) => {
             const { queue, repeatMode, shuffleMode, currentTrack } = get();
 
             // If event.track is null, it means playback stopped or queue ended
             if (!event.track) return;
+
+            // Handle 'endOfTrack' sleep timer
+            if (get().sleepTimerTarget === 'endOfTrack') {
+                set({ sleepTimerTarget: null, isPlaying: false });
+                await audioService.pause();
+                // We still want to let it set the new track so UI updates, but paused.
+            }
 
             // Update current track in store
             // We need to find the full track object from our queue
@@ -241,22 +246,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 set({ currentTrack: newTrack });
             }
         });
+        listenerCleanups.push(() => sub3.remove());
 
-        TrackPlayer.addEventListener(Event.PlaybackState, (event: any) => {
+        const sub4 = TrackPlayer.addEventListener(Event.PlaybackState, (event: any) => {
             set({ isPlaying: event.state === 'playing' });
         });
+        listenerCleanups.push(() => sub4.remove());
 
         // Progress update throttling for battery optimization
         let lastProgressUpdate = 0;
         const BACKGROUND_THROTTLE_MS = 5000; // Only update every 5 seconds in background
-        let crossfadeInProgress = false; // Prevent duplicate crossfade triggers
 
-        TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, async (event: any) => {
-            const { sleepTimerTarget, durationMillis: existingDuration, repeatMode, queue, currentTrack, isPlaying } = get();
-            const { crossfadeEnabled, crossfadeDuration } = useSettingsStore.getState();
+        const sub5 = TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, async (event: any) => {
+            const { sleepTimerTarget, durationMillis: existingDuration } = get();
 
             // Check Sleep Timer (always check, even when throttled)
-            if (sleepTimerTarget && Date.now() > sleepTimerTarget) {
+            if (sleepTimerTarget && typeof sleepTimerTarget === 'number' && Date.now() > sleepTimerTarget) {
                 set({ isPlaying: false, sleepTimerTarget: null });
                 audioService.pause();
             }
@@ -279,55 +284,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 positionMillis: positionMs,
                 durationMillis: durationMs
             });
-
-            // Crossfade logic
-            if (crossfadeEnabled && isPlaying && durationMs > 0 && currentTrack && !crossfadeInProgress) {
-                const crossfadeDurationMs = crossfadeDuration * 1000;
-                const timeRemainingMs = durationMs - positionMs;
-
-                // Start crossfade when we're within crossfadeDuration of the end
-                // Only trigger if there's a next track to play
-                if (timeRemainingMs > 0 && timeRemainingMs <= crossfadeDurationMs) {
-                    // Find next track
-                    const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
-                    let nextTrack = null;
-
-                    if (repeatMode === 'one') {
-                        // Don't crossfade for repeat one
-                        return;
-                    } else if (currentIndex < queue.length - 1) {
-                        nextTrack = queue[currentIndex + 1];
-                    } else if (repeatMode === 'all' && queue.length > 0) {
-                        nextTrack = queue[0];
-                    }
-
-                    if (nextTrack && nextTrack.id !== currentTrack.id) {
-                        crossfadeInProgress = true;
-
-                        try {
-                            // Calculate remaining fade time
-                            const fadeTimeMs = Math.min(timeRemainingMs, crossfadeDurationMs / 2);
-
-                            // Fade out current track
-                            await audioService.fadeOut(fadeTimeMs);
-
-                            // Skip to next track
-                            const { playTrack } = get();
-                            await playTrack(nextTrack);
-
-                            // Fade in new track
-                            await audioService.fadeIn(fadeTimeMs);
-                        } catch (error) {
-                            console.warn('[PlayerStore] Crossfade failed:', error);
-                            // Reset volume on error
-                            await audioService.setVolume(1);
-                        } finally {
-                            crossfadeInProgress = false;
-                        }
-                    }
-                }
-            }
         });
+        listenerCleanups.push(() => sub5.remove());
 
         // Hydrate state from database first (INSTANT - <50ms)
         // Then validate/sync with native player in background
@@ -413,9 +371,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         }
     },
 
-    setSleepTimer: (minutes: number | null) => {
+    setSleepTimer: (minutes: number | 'endOfTrack' | null) => {
         if (minutes === null) {
             set({ sleepTimerTarget: null });
+        } else if (minutes === 'endOfTrack') {
+            set({ sleepTimerTarget: 'endOfTrack' });
         } else {
             set({ sleepTimerTarget: Date.now() + minutes * 60 * 1000 });
         }
@@ -491,14 +451,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 durationMillis: track.durationMillis || 0
             });
 
-            // Ensure volume is at full after crossfade transitions
-            // This handles edge cases where crossfade might have left volume low
-            const { crossfadeEnabled } = useSettingsStore.getState();
-            if (!crossfadeEnabled) {
-                // Only reset volume if crossfade is disabled - crossfade handles its own volume
-                await audioService.setVolume(1);
-            }
-
             // Persist queue state for instant restoration on next wake
             persistQueueState();
 
@@ -534,26 +486,30 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     },
 
     setQueue: (tracks) => {
-        set({ queue: tracks, originalQueue: [], shuffleMode: false });
+        const tracksWithIds = tracks.map(t => ({ ...t, queueItemId: t.queueItemId || `${t.id}-${Date.now()}-${Math.random()}` }));
+        set({ queue: tracksWithIds, originalQueue: [], shuffleMode: false });
         persistQueueState();
     },
 
     addToQueueNext: (track) => {
         const { queue, currentTrack } = get();
+        const trackWithId = { ...track, queueItemId: `${track.id}-${Date.now()}-${Math.random()}` };
+
         if (!currentTrack) {
-            set({ queue: [track, ...queue] });
+            set({ queue: [trackWithId, ...queue] });
             return;
         }
         const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
         const newQueue = [...queue];
-        newQueue.splice(currentIndex + 1, 0, track);
+        newQueue.splice(currentIndex + 1, 0, trackWithId);
         set({ queue: newQueue });
         persistQueueState();
     },
 
     addToQueueEnd: (track) => {
         const { queue } = get();
-        set({ queue: [...queue, track] });
+        const trackWithId = { ...track, queueItemId: `${track.id}-${Date.now()}-${Math.random()}` };
+        set({ queue: [...queue, trackWithId] });
         persistQueueState();
     },
 
@@ -566,11 +522,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         persistQueueState();
     },
 
-    removeFromQueue: (trackId) => {
+    removeFromQueue: (queueItemId) => {
         const { queue, originalQueue } = get();
+        // Fallback to track ID if queueItemId isn't present
         set({
-            queue: queue.filter(t => t.id !== trackId),
-            originalQueue: originalQueue.filter(t => t.id !== trackId),
+            queue: queue.filter(t => (t.queueItemId || t.id) !== queueItemId),
+            originalQueue: originalQueue.filter(t => (t.queueItemId || t.id) !== queueItemId),
         });
         persistQueueState();
     },

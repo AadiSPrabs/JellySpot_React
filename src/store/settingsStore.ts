@@ -15,14 +15,10 @@ interface SettingsState {
     backgroundType: BackgroundType;
     themeColor: string;
     audioQuality: 'lossless' | 'high' | 'low' | 'auto';
-    crossfadeEnabled: boolean;
-    crossfadeDuration: number; // in seconds (1-12)
     setAdaptiveBackground: (enabled: boolean) => void;
     setBackgroundType: (type: BackgroundType) => void;
     setThemeColor: (color: string) => void;
     setAudioQuality: (quality: 'lossless' | 'high' | 'low' | 'auto') => void;
-    setCrossfadeEnabled: (enabled: boolean) => void;
-    setCrossfadeDuration: (duration: number) => void;
     dataSource: 'jellyfin' | 'local';
     setDataSource: (source: 'jellyfin' | 'local') => void;
     // Source mode settings
@@ -47,12 +43,18 @@ interface SettingsState {
     // Jellyfin library selection (empty array = all libraries)
     selectedJellyfinLibraries: string[];
     setSelectedJellyfinLibraries: (libraryIds: string[]) => void;
-    // Lyrics offset in milliseconds (positive = show earlier, negative = show later)
-    lyricsOffset: number;
-    setLyricsOffset: (offset: number) => void;
+    // Lyrics offset dictionary mapping TrackID -> Offset in milliseconds (positive = show earlier)
+    lyricsOffsets: Record<string, number>;
+    setLyricsOffset: (trackId: string, offset: number) => void;
     // Playback speed (0.5 - 2.0, default 1.0)
     playbackRate: number;
     setPlaybackRate: (rate: number) => void;
+    // External Lyrics Preference
+    lyricsSourcePreference: 'jellyfin' | 'lrclib' | 'offline-only';
+    setLyricsSourcePreference: (pref: 'jellyfin' | 'lrclib' | 'offline-only') => void;
+    // Lyrics Translation
+    translationLanguages: Record<string, string>; // Maps trackId -> lang code
+    setTranslationLanguage: (trackId: string, lang: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -62,8 +64,6 @@ export const useSettingsStore = create<SettingsState>()(
             backgroundType: 'blurred', // Default to blurred image
             themeColor: '#D0BCFF', // Default Primary
             audioQuality: 'lossless',
-            crossfadeEnabled: false,
-            crossfadeDuration: 5, // default 5 seconds
             dataSource: 'jellyfin',
             sourceMode: 'both', // Default to both until onboarding
             onboardingComplete: false,
@@ -77,8 +77,10 @@ export const useSettingsStore = create<SettingsState>()(
             maxConcurrentDownloads: 1, // default to 1 at a time
             wifiOnlyDownloads: false, // allow downloads on any network by default
             selectedJellyfinLibraries: [], // empty = all libraries
-            lyricsOffset: 500, // Default 500ms lead time
+            lyricsOffsets: {}, // Default empty map
             playbackRate: 1.0, // Default normal speed
+            lyricsSourcePreference: 'lrclib', // Default to prioritize LRCLIB
+            translationLanguages: {}, // Map of trackId to language
 
             setAdaptiveBackground: (enabled) => set({ adaptiveBackground: enabled }),
             setBackgroundType: (type) => set({
@@ -87,8 +89,6 @@ export const useSettingsStore = create<SettingsState>()(
             }),
             setThemeColor: (color) => set({ themeColor: color }),
             setAudioQuality: (quality) => set({ audioQuality: quality }),
-            setCrossfadeEnabled: (enabled) => set({ crossfadeEnabled: enabled }),
-            setCrossfadeDuration: (duration) => set({ crossfadeDuration: duration }),
             setDataSource: (source) => set({ dataSource: source }),
             setSourceMode: (mode) => set({ sourceMode: mode }),
             setOnboardingComplete: (complete) => set({ onboardingComplete: complete }),
@@ -101,8 +101,20 @@ export const useSettingsStore = create<SettingsState>()(
             setMaxConcurrentDownloads: (count) => set({ maxConcurrentDownloads: count }),
             setWifiOnlyDownloads: (enabled) => set({ wifiOnlyDownloads: enabled }),
             setSelectedJellyfinLibraries: (libraryIds) => set({ selectedJellyfinLibraries: libraryIds }),
-            setLyricsOffset: (offset) => set({ lyricsOffset: offset }),
+            setLyricsOffset: (trackId, offset) => set((state) => ({
+                lyricsOffsets: {
+                    ...state.lyricsOffsets,
+                    [trackId]: offset
+                }
+            })),
             setPlaybackRate: (rate) => set({ playbackRate: Math.max(0.5, Math.min(2.0, rate)) }),
+            setLyricsSourcePreference: (pref) => set({ lyricsSourcePreference: pref }),
+            setTranslationLanguage: (trackId, lang) => set((state) => ({
+                translationLanguages: {
+                    ...state.translationLanguages,
+                    [trackId]: lang
+                }
+            })),
         }),
         {
             name: 'settings-storage',

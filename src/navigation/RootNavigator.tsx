@@ -12,6 +12,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { StatusBar } from 'expo-status-bar';
 import MiniPlayer from '../components/MiniPlayer';
+import GlobalPlayer from '../components/GlobalPlayer';
 import { useTheme } from 'react-native-paper';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -27,7 +28,7 @@ export default function RootNavigator() {
     // Show onboarding first if not completed
     if (!onboardingComplete) {
         return (
-            <NavigationContainer theme={theme}>
+            <NavigationContainer theme={theme as any}>
                 <StatusBar style="light" />
                 <OnboardingScreen />
             </NavigationContainer>
@@ -46,7 +47,7 @@ export default function RootNavigator() {
 
     return (
         <NavigationContainer
-            theme={theme}
+            theme={theme as any}
             ref={navigationRef}
             onStateChange={() => {
                 const currentRouteName = navigationRef.current?.getCurrentRoute()?.name;
@@ -65,23 +66,12 @@ export default function RootNavigator() {
                     {canAccessMain ? (
                         <>
                             <Stack.Screen name="Main" component={MainNavigator} />
-                            <Stack.Screen
-                                name="Player"
-                                component={PlayerScreen}
-                                options={{
-                                    presentation: 'transparentModal',
-                                    animation: 'slide_from_bottom',
-                                    gestureEnabled: true,
-                                    gestureDirection: 'vertical',
-                                    contentStyle: { backgroundColor: theme.colors.background },
-                                }}
-                            />
                         </>
                     ) : (
                         <Stack.Screen name="Auth" component={AuthNavigator} />
                     )}
                 </Stack.Navigator>
-                {canAccessMain && <MiniPlayer isPlayerVisible={isPlayerVisible} />}
+                {canAccessMain && <GlobalPlayer />}
             </View>
         </NavigationContainer>
     );

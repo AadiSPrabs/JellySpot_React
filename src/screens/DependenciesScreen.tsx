@@ -3,6 +3,10 @@ import { View, StyleSheet, FlatList, Linking } from 'react-native';
 import { Text, List, IconButton, useTheme, Divider, TouchableRipple } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import SettingsGroup from '../components/SettingsGroup';
+import SettingsItem from '../components/SettingsItem';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { ScrollView } from 'react-native';
 
 interface Dependency {
     name: string;
@@ -70,29 +74,24 @@ export default function DependenciesScreen() {
                 <Text variant="titleLarge" style={{ fontWeight: 'bold' }}>Dependencies</Text>
             </View>
 
-            <Text variant="bodySmall" style={{ paddingHorizontal: 16, color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
+            <Text variant="bodySmall" style={{ paddingHorizontal: 24, color: theme.colors.onSurfaceVariant, marginBottom: 16 }}>
                 Tap on a package to view its GitHub repository
             </Text>
 
-            <FlatList
-                data={dependencies}
-                keyExtractor={(item) => item.name}
-                renderItem={({ item }) => (
-                    <TouchableRipple
-                        onPress={() => handlePress(item.github)}
-                        disabled={!item.github}
-                    >
-                        <List.Item
+            <ScrollView contentContainerStyle={styles.listContent}>
+                <SettingsGroup>
+                    {dependencies.map(item => (
+                        <SettingsItem
+                            key={item.name}
                             title={item.name}
-                            titleStyle={{ color: item.github ? theme.colors.primary : theme.colors.onSurface }}
-                            left={props => <List.Icon {...props} icon="package-variant" />}
-                            right={props => item.github ? <List.Icon {...props} icon="open-in-new" /> : null}
+                            icon="package-variant"
+                            onPress={() => handlePress(item.github)}
+                            disabled={!item.github}
+                            right={() => item.github ? <MaterialCommunityIcons name="open-in-new" size={20} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} /> : undefined}
                         />
-                    </TouchableRipple>
-                )}
-                ItemSeparatorComponent={Divider}
-                contentContainerStyle={styles.listContent}
-            />
+                    ))}
+                </SettingsGroup>
+            </ScrollView>
         </SafeAreaView>
     );
 }

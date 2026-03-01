@@ -210,7 +210,7 @@ export default function MainNavigator() {
                 key={isLocalOnly ? 'local-only' : 'with-jellyfin'}
                 screenOptions={{
                     headerShown: false,
-                    contentStyle: {
+                    sceneStyle: {
                         paddingBottom: isLandscape ? 0 : 90, // Push content up in portrait
                     },
                     tabBarStyle: isLandscape ? {

@@ -4,6 +4,8 @@ import { Text, List, useTheme, IconButton, RadioButton, Switch } from 'react-nat
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useSettingsStore, BackgroundType } from '../store/settingsStore';
+import SettingsGroup from '../components/SettingsGroup';
+import SettingsItem from '../components/SettingsItem';
 
 const THEME_COLORS = [
     '#D0BCFF', // Default Purple
@@ -37,29 +39,24 @@ export default function AppearanceScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
-                <List.Section>
-                    <List.Subheader>Player Background</List.Subheader>
+                <SettingsGroup title="Player Background">
                     <RadioButton.Group
                         onValueChange={(value) => setBackgroundType(value as BackgroundType)}
                         value={backgroundType}
                     >
                         {BACKGROUND_OPTIONS.map(option => (
-                            <List.Item
+                            <SettingsItem
                                 key={option.value}
                                 title={option.label}
                                 description={option.description}
-                                left={() => (
-                                    <RadioButton value={option.value} />
-                                )}
                                 onPress={() => setBackgroundType(option.value)}
-                                style={styles.radioItem}
+                                right={() => <RadioButton value={option.value} />}
                             />
                         ))}
                     </RadioButton.Group>
-                </List.Section>
+                </SettingsGroup>
 
-                <List.Section>
-                    <List.Subheader>Theme Color</List.Subheader>
+                <SettingsGroup title="Theme Color">
                     <View style={styles.colorGrid}>
                         {THEME_COLORS.map(color => (
                             <TouchableOpacity
@@ -77,14 +74,14 @@ export default function AppearanceScreen() {
                             </TouchableOpacity>
                         ))}
                     </View>
-                </List.Section>
+                </SettingsGroup>
 
-                <List.Section>
-                    <List.Subheader>Display</List.Subheader>
-                    <List.Item
+                <SettingsGroup title="Display">
+                    <SettingsItem
                         title="AMOLED Mode"
                         description="Use pure black background"
-                        left={props => <List.Icon {...props} icon="brightness-2" />}
+                        icon="brightness-2"
+                        onPress={() => setAmoledMode(!isAmoledMode)}
                         right={() => (
                             <Switch
                                 value={isAmoledMode}
@@ -92,7 +89,7 @@ export default function AppearanceScreen() {
                             />
                         )}
                     />
-                </List.Section>
+                </SettingsGroup>
             </ScrollView>
         </SafeAreaView>
     );

@@ -4,31 +4,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { getTracksAsync, getTrackMetadataAsync, type Track as MusicTrack } from '@nodefinity/react-native-music-library';
 import { DatabaseService } from '../services/DatabaseService';
-import * as FileSystem from 'expo-file-system/legacy';
+import { Directory, File, Paths } from 'expo-file-system';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
+import { Track } from '../types/track';
 
-export interface Track {
-    id: string;
-    name: string;
-    artist: string;
-    album: string;
-    genre?: string;
-    imageUrl: string;
-    imageBlurHash?: string;
-    durationMillis: number;
-    streamUrl: string;
-    artistId: string;
-    isFavorite?: boolean;
-    metadataEnriched?: boolean;
-    // Technical details
-    bitrate?: number;
-    codec?: string;
-    container?: string;
-    fileSize?: number; // File size in bytes from system
-    // Lyrics (embedded in audio file)
-    lyrics?: string;
-    trackNumber?: number;
-}
+// Re-export Track for backward compatibility
+export type { Track } from '../types/track';
 
 interface LocalPlaylist {
     id: string;
@@ -80,6 +62,7 @@ export interface LocalLibraryState {
     isFavorite: (trackId: string) => boolean;
     getFavoriteTracks: () => Track[];
     deleteTrack: (track: Track) => Promise<boolean>;
+    loadTracksFromDb: () => Promise<void>;
 }
 
 // Generate a random ID
@@ -112,6 +95,15 @@ export const useLocalLibraryStore = create<LocalLibraryState>()(
             permissionGranted: false,
             availableFolders: [],
             selectedFolderPaths: [], // Empty = all folders selected
+
+            loadTracksFromDb: async () => {
+                try {
+                    const dbTracks = await DatabaseService.getAllTracks();
+                    set({ tracks: dbTracks as Track[] });
+                } catch (error) {
+                    console.error("Failed to load tracks from DB:", error);
+                }
+            },
 
             requestPermissions: async () => {
                 if (Platform.OS === 'android') {
@@ -495,7 +487,7 @@ export const useLocalLibraryStore = create<LocalLibraryState>()(
                                     fileUri = 'file://' + fileUri;
                                 }
                             }
-                            await FileSystem.deleteAsync(fileUri, { idempotent: true });
+                            await FileSystemLegacy.deleteAsync(fileUri, { idempotent: true });
                             deleted = true;
                         } catch (fsErr) {
                             console.error("FileSystem delete also failed:", fsErr);
@@ -528,17 +520,6 @@ export const useLocalLibraryStore = create<LocalLibraryState>()(
             name: 'local-library-storage',
             storage: createJSONStorage(() => AsyncStorage),
             partialize: (state) => ({
-                // Persist all URL types except base64 data: URLs (causes OOM)
-                // Keep: file://, /, content://, http://, https://
-                tracks: state.tracks.map(t => {
-                    // Only strip data: base64 URLs which are huge and crash storage
-                    const shouldKeepArtwork = t.imageUrl && !t.imageUrl.startsWith('data:');
-                    return {
-                        ...t,
-                        imageUrl: shouldKeepArtwork ? t.imageUrl : '',
-                        metadataEnriched: shouldKeepArtwork ? t.metadataEnriched : false,
-                    };
-                }),
                 playlists: state.playlists,
                 permissionGranted: state.permissionGranted,
                 selectedFolderPaths: state.selectedFolderPaths,

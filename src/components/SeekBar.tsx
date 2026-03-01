@@ -73,7 +73,7 @@ export const SeekBar: React.FC<SeekBarProps> = ({
     return (
         <View style={styles.container} onLayout={onLayout} {...panResponderImplemented.panHandlers}>
             {/* HitSlop for easier grabbing isn't passed to View, but the Container is large enough */}
-            <View style={styles.touchArea}>
+            <View style={styles.touchArea} pointerEvents="none">
                 {/* Background Track */}
                 <View style={[styles.track, { backgroundColor: inactiveColor }]} />
 
