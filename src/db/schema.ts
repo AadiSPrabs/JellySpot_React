@@ -41,6 +41,7 @@ export const playlistTracks = sqliteTable('playlist_tracks', {
 export const playHistory = sqliteTable('play_history', {
     id: text('id').primaryKey(),
     trackId: text('track_id').notNull(),
+    playlistId: text('playlist_id'), // Optional: track which playlist it was played from
     playedAt: integer('played_at', { mode: 'timestamp' }).notNull(),
     playDurationMs: integer('play_duration_ms'), // How long they listened
     completedPlay: integer('completed_play', { mode: 'boolean' }).default(false), // Did they finish >80%?

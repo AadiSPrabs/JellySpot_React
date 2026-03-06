@@ -55,6 +55,12 @@ interface SettingsState {
     // Lyrics Translation
     translationLanguages: Record<string, string>; // Maps trackId -> lang code
     setTranslationLanguage: (trackId: string, lang: string) => void;
+    // Prefer Jellyfin lyrics toggle
+    preferJellyfinLyrics: boolean;
+    setPreferJellyfinLyrics: (prefer: boolean) => void;
+    // Queue limit (0 = unlimited)
+    queueLimit: number;
+    setQueueLimit: (limit: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -81,6 +87,8 @@ export const useSettingsStore = create<SettingsState>()(
             playbackRate: 1.0, // Default normal speed
             lyricsSourcePreference: 'lrclib', // Default to prioritize LRCLIB
             translationLanguages: {}, // Map of trackId to language
+            preferJellyfinLyrics: false, // Default to false (LRCLIB fallback handles it anyway if enabled)
+            queueLimit: 500, // Default queue limit
 
             setAdaptiveBackground: (enabled) => set({ adaptiveBackground: enabled }),
             setBackgroundType: (type) => set({
@@ -115,6 +123,8 @@ export const useSettingsStore = create<SettingsState>()(
                     [trackId]: lang
                 }
             })),
+            setPreferJellyfinLyrics: (prefer) => set({ preferJellyfinLyrics: prefer }),
+            setQueueLimit: (limit) => set({ queueLimit: limit }),
         }),
         {
             name: 'settings-storage',

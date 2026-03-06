@@ -18,29 +18,30 @@ export const SourceSwitcher = () => {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
 
+    const [containerWidth, setContainerWidth] = React.useState(0);
+
     // Animation values
     const slideAnim = useRef(new Animated.Value(dataSource === 'jellyfin' ? 0 : 1)).current;
-    const scaleJellyfin = useRef(new Animated.Value(dataSource === 'jellyfin' ? 1 : 0.95)).current;
-    const scaleLocal = useRef(new Animated.Value(dataSource === 'local' ? 1 : 0.95)).current;
+    const scaleJellyfin = useRef(new Animated.Value(dataSource === 'jellyfin' ? 1 : 0.97)).current;
+    const scaleLocal = useRef(new Animated.Value(dataSource === 'local' ? 1 : 0.97)).current;
 
     useEffect(() => {
         const isJellyfin = dataSource === 'jellyfin';
 
-        // Animate the sliding indicator
         Animated.parallel([
             Animated.spring(slideAnim, {
                 toValue: isJellyfin ? 0 : 1,
-                useNativeDriver: false,
-                speed: 15,
-                bounciness: 4,
+                useNativeDriver: true, // Now uses native driver because we animate transform
+                speed: 18,
+                bounciness: 2,
             }),
             Animated.spring(scaleJellyfin, {
-                toValue: isJellyfin ? 1 : 0.95,
+                toValue: isJellyfin ? 1 : 0.97,
                 useNativeDriver: true,
                 speed: 15,
             }),
             Animated.spring(scaleLocal, {
-                toValue: isJellyfin ? 0.95 : 1,
+                toValue: isJellyfin ? 0.97 : 1,
                 useNativeDriver: true,
                 speed: 15,
             }),
@@ -48,104 +49,98 @@ export const SourceSwitcher = () => {
     }, [dataSource]);
 
     const handleSwitch = (source: 'jellyfin' | 'local') => {
+        if (source === dataSource) return;
+
         if (source === 'jellyfin' && !isAuthenticated) {
-            // User wants to switch to Jellyfin but is not authenticated
-            // Navigate to Source Mode settings to enter credentials
-            // SourceSwitcher is rendered in HomeStack, so navigate directly
             navigation.navigate('SourceModeSettings' as any);
             return;
         }
 
-        // Trigger LayoutAnimation for content change
-        LayoutAnimation.configureNext({
-            duration: 300,
-            create: { type: 'easeOut', property: 'opacity' },
-            update: { type: 'spring', springDamping: 0.7 },
-            delete: { type: 'easeIn', property: 'opacity' },
-        });
         setDataSource(source);
 
-        // Reset Library and Search stacks to prevent invalid state persistence
-        // We need to access the parent Loop (Tab Navigator) to modify sibling stacks
-        const parentNav = navigation.getParent();
-        if (parentNav) {
-            parentNav.dispatch(state => {
-                // Keep the current routes but strip the state from Library and Search
-                const routes = state.routes.map(r => {
-                    if (r.name === 'LibraryStack' || r.name === 'SearchStack') {
-                        // Return the route without its nested state (resetting it)
-                        return { name: r.name, key: r.key };
-                    }
-                    return r;
-                });
-
-                return CommonActions.reset({
-                    ...state,
-                    routes,
-                    index: state.index,
-                });
-            });
-        }
+        // setDataSource(source) is already called above, which will trigger
+        // re-renders in all screens watching dataSource.
+        // No need for a full navigation reset which causes jumping/flickering.
     };
 
-    // Calculate sliding indicator position
-    const indicatorLeft = slideAnim.interpolate({
+    // Calculate sliding indicator position and width
+    // Use pixel spacing for perfect alignment (4px padding)
+    const indicatorWidth = containerWidth > 0 ? (containerWidth - 8) / 2 : 0;
+    const indicatorTranslateX = slideAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: ['0%', '50%'],
+        outputRange: [0, (containerWidth / 2) - 4], // Subtract padding to align perfectly on the right
     });
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.elevation.level1 }]}>
-            {/* Animated sliding indicator */}
-            <Animated.View
-                style={[
-                    styles.indicator,
-                    {
-                        backgroundColor: theme.colors.primaryContainer,
-                        left: indicatorLeft,
-                    }
-                ]}
-            />
+        <View
+            style={[
+                styles.container,
+                {
+                    backgroundColor: theme.colors.elevation.level2,
+                    borderColor: theme.colors.outlineVariant,
+                    borderWidth: 0.5,
+                    width: 220, // Fixed width for consistent look
+                }
+            ]}
+            onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+        >
+            {/* Animated sliding indicator with shadow */}
+            {containerWidth > 0 && (
+                <Animated.View
+                    style={[
+                        styles.indicator,
+                        {
+                            backgroundColor: theme.colors.secondaryContainer,
+                            left: 4, // Initial static position
+                            width: indicatorWidth,
+                            transform: [{ translateX: indicatorTranslateX }],
+                            // High-quality elevation/shadow
+                            ...Platform.select({
+                                ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
+                                android: { elevation: 3 },
+                            }),
+                        }
+                    ]}
+                />
+            )}
 
             {/* Jellyfin option */}
-            <Animated.View style={{ flex: 1, transform: [{ scale: scaleJellyfin }] }}>
-                <TouchableOpacity
-                    style={styles.option}
-                    onPress={() => handleSwitch('jellyfin')}
-                    activeOpacity={0.7}
+            <TouchableOpacity
+                style={[styles.option, { flex: 1 }]}
+                onPress={() => handleSwitch('jellyfin')}
+                activeOpacity={1}
+            >
+                <Animated.Text
+                    style={[
+                        styles.text,
+                        { transform: [{ scale: scaleJellyfin }] },
+                        dataSource === 'jellyfin'
+                            ? { color: theme.colors.onSecondaryContainer, fontWeight: 'bold' }
+                            : { color: theme.colors.onSurfaceVariant }
+                    ]}
                 >
-                    <Text
-                        style={[
-                            styles.text,
-                            dataSource === 'jellyfin'
-                                ? { color: theme.colors.onPrimaryContainer, fontWeight: 'bold' }
-                                : { color: theme.colors.onSurfaceVariant }
-                        ]}
-                    >
-                        Jellyfin
-                    </Text>
-                </TouchableOpacity>
-            </Animated.View>
+                    Jellyfin
+                </Animated.Text>
+            </TouchableOpacity>
 
             {/* Local option */}
-            <Animated.View style={{ flex: 1, transform: [{ scale: scaleLocal }] }}>
-                <TouchableOpacity
-                    style={styles.option}
-                    onPress={() => handleSwitch('local')}
-                    activeOpacity={0.7}
+            <TouchableOpacity
+                style={[styles.option, { flex: 1 }]}
+                onPress={() => handleSwitch('local')}
+                activeOpacity={1}
+            >
+                <Animated.Text
+                    style={[
+                        styles.text,
+                        { transform: [{ scale: scaleLocal }] },
+                        dataSource === 'local'
+                            ? { color: theme.colors.onSecondaryContainer, fontWeight: 'bold' }
+                            : { color: theme.colors.onSurfaceVariant }
+                    ]}
                 >
-                    <Text
-                        style={[
-                            styles.text,
-                            dataSource === 'local'
-                                ? { color: theme.colors.onPrimaryContainer, fontWeight: 'bold' }
-                                : { color: theme.colors.onSurfaceVariant }
-                        ]}
-                    >
-                        Local
-                    </Text>
-                </TouchableOpacity>
-            </Animated.View>
+                    Local
+                </Animated.Text>
+            </TouchableOpacity>
         </View>
     );
 };
@@ -153,7 +148,7 @@ export const SourceSwitcher = () => {
 const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
-        borderRadius: 20,
+        borderRadius: 24, // Rounder for a pill look
         padding: 4,
         position: 'relative',
         overflow: 'hidden',
@@ -162,17 +157,15 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 4,
         bottom: 4,
-        width: '50%',
-        borderRadius: 16,
+        borderRadius: 20,
     },
     option: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 16,
+        paddingVertical: 8, // Taller options
         alignItems: 'center',
         justifyContent: 'center',
+        zIndex: 1, // Ensure text is above indicator
     },
     text: {
-        fontSize: 12,
+        fontSize: 14, // Slightly bigger
     }
 });

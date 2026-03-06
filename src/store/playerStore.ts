@@ -29,6 +29,7 @@ interface PlayerState {
     playNext: () => Promise<void>;
     playPrevious: () => Promise<void>;
     setQueue: (tracks: Track[], startIndex?: number) => void;
+    setRawQueue: (rawTracks: any[], dataSource: string, itemId: string, itemType: string) => Track[];
     addToQueueNext: (track: Track) => void;
     addToQueueEnd: (track: Track) => void;
     toggleShuffle: () => void;
@@ -46,6 +47,10 @@ interface PlayerState {
     toggleCurrentTrackFavorite: () => Promise<void>;
     isPlayerExpanded: boolean;
     setPlayerExpanded: (expanded: boolean) => void;
+    heroCardVisible: boolean;
+    setHeroCardVisible: (visible: boolean) => void;
+    isQueueVisible: boolean;
+    setQueueVisible: (visible: boolean) => void;
 }
 
 // Network state cache for battery optimization (30-second TTL)
@@ -116,28 +121,50 @@ const getStreamUrl = async (track: Track): Promise<string> => {
     }
 };
 
-// Rapid Skip Accumulator State
-let skipTimer: NodeJS.Timeout | null = null;
-let pendingSkips = 0;
-
 // Queue Persistence Debounce (saves every 2 seconds max while changes are happening)
 let persistTimer: NodeJS.Timeout | null = null;
+// JSON replacer that strips heavy fields like lyrics to keep payload small
+const HEAVY_FIELDS = new Set(['lyrics']);
+const lightweightReplacer = (key: string, value: any) => HEAVY_FIELDS.has(key) ? undefined : value;
+
 const persistQueueState = () => {
     if (persistTimer) {
         clearTimeout(persistTimer);
     }
     persistTimer = setTimeout(() => {
         const state = usePlayerStore.getState();
-        DatabaseService.saveQueueState({
+
+        let persistentQueue = state.queue;
+        let persistentOriginal = state.originalQueue;
+
+        // Limit size for safety
+        if (state.queue.length > 500) {
+            const currentIndex = state.currentTrack
+                ? state.queue.findIndex(t => t.id === state.currentTrack?.id)
+                : 0;
+            const start = Math.max(0, currentIndex - 100);
+            const end = Math.min(state.queue.length, currentIndex + 400);
+            persistentQueue = state.queue.slice(start, end);
+        }
+
+        if (state.originalQueue.length > 300) {
+            persistentOriginal = state.originalQueue.slice(0, 300);
+        }
+
+        // Use JSON replacer to strip heavy fields in one pass (no intermediate objects)
+        const payload = JSON.stringify({
             currentTrack: state.currentTrack,
-            queue: state.queue,
-            originalQueue: state.originalQueue,
+            queue: persistentQueue,
+            originalQueue: persistentOriginal,
             shuffleMode: state.shuffleMode,
             repeatMode: state.repeatMode,
             positionMillis: state.positionMillis,
-        });
+        }, lightweightReplacer);
+
+        // Parse back for the DB service (it expects an object)
+        DatabaseService.saveQueueState(JSON.parse(payload));
         persistTimer = null;
-    }, 2000); // Debounce: save 2s after last change
+    }, 2000); // 2s debounce
 };
 // Guard against duplicate init() calls (e.g., HMR)
 let isInitialized = false;
@@ -157,6 +184,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     clearPlaybackError: () => set({ playbackError: null }),
     isPlayerExpanded: false,
     setPlayerExpanded: (expanded: boolean) => set({ isPlayerExpanded: expanded }),
+    heroCardVisible: false,
+    setHeroCardVisible: (visible: boolean) => set({ heroCardVisible: visible }),
+    isQueueVisible: false,
+    setQueueVisible: (visible: boolean) => set({ isQueueVisible: visible }),
 
     // Initialize listeners
     init: async () => {
@@ -185,49 +216,59 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         listenerCleanups.push(() => sub2.remove());
 
         const sub3 = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (event: any) => {
-            const { queue, repeatMode, shuffleMode, currentTrack } = get();
+            const { queue, repeatMode, currentTrack: previousTrack } = get();
 
-            // If event.track is null, it means playback stopped or queue ended
             if (!event.track) return;
 
             // Handle 'endOfTrack' sleep timer
             if (get().sleepTimerTarget === 'endOfTrack') {
                 set({ sleepTimerTarget: null, isPlaying: false });
-                await audioService.pause();
-                // We still want to let it set the new track so UI updates, but paused.
+                audioService.pause();
             }
 
-            // Update current track in store
-            // We need to find the full track object from our queue
+            // INSTANT RESPONSE: Update current track status in store first
             const newTrack = queue.find(t => t.id === event.track.id || t.streamUrl === event.track.url);
-
             if (newTrack) {
-                // Determine the NEXT track to buffer
-                // Logic duplicates getNextTrack but we need it here to buffer
-                let nextTrack: Track | undefined;
-                const currentIndex = queue.findIndex(t => t.id === newTrack.id);
+                set({
+                    currentTrack: newTrack,
+                    positionMillis: 0,
+                    durationMillis: newTrack.durationMillis || 0
+                });
 
-                if (repeatMode === 'one') {
+                // Record play for the PREVIOUS track now that we know we moved on
+                if (previousTrack && previousTrack.id !== newTrack.id) {
+                    // Fire and forget recording to not block track change
+                    const source = previousTrack.streamUrl?.startsWith('file://') ? 'local' : 'jellyfin';
+                    DatabaseService.recordPlay(previousTrack, source, 0, false, previousTrack.playlistId).catch(() => { });
+                }
+            }
+
+            // BACKGROUND TASK: Determine and buffer NEXT track
+            // This happens in a short timeout to ensure the UI update above is processed first
+            setTimeout(async () => {
+                if (!newTrack) return;
+
+                const { queue: currentQueue, repeatMode: currentRepeat } = get();
+                let nextTrack: Track | undefined;
+                const currentIndex = currentQueue.findIndex(t => t.id === newTrack.id);
+
+                if (currentRepeat === 'one') {
                     nextTrack = newTrack;
-                } else if (currentIndex < queue.length - 1) {
-                    nextTrack = queue[currentIndex + 1];
-                } else if (repeatMode === 'all') {
-                    nextTrack = queue[0];
+                } else if (currentIndex < currentQueue.length - 1) {
+                    nextTrack = currentQueue[currentIndex + 1];
+                } else if (currentRepeat === 'all') {
+                    nextTrack = currentQueue[0];
                 }
 
                 if (nextTrack) {
-                    // Check if next track is already in native queue to prevent duplicates
-                    const nativeQueue = await TrackPlayer.getQueue();
-                    const currentNativeIndex = await TrackPlayer.getActiveTrackIndex();
+                    try {
+                        const nativeQueue = await TrackPlayer.getQueue();
+                        const currentNativeIndex = await TrackPlayer.getActiveTrackIndex();
+                        const nextNativeTrack = nativeQueue[currentNativeIndex + 1];
 
-                    // We only need to add if the NEXT native track doesn't match our desired next track
-                    const nextNativeTrack = nativeQueue[currentNativeIndex + 1];
-                    const shouldAdd = !nextNativeTrack || nextNativeTrack.id !== nextTrack.id;
-
-                    if (shouldAdd) {
-                        const nextUrl = await getStreamUrl(nextTrack);
-                        if (nextUrl) {
-                            try {
+                        if (!nextNativeTrack || nextNativeTrack.id !== nextTrack.id) {
+                            const nextUrl = await getStreamUrl(nextTrack);
+                            if (nextUrl) {
                                 await audioService.addToQueue({
                                     id: nextTrack.id,
                                     url: nextUrl,
@@ -236,20 +277,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                                     artwork: nextTrack.imageUrl && !nextTrack.imageUrl.startsWith('data:') ? nextTrack.imageUrl : undefined,
                                     duration: (nextTrack.durationMillis || 0) / 1000
                                 });
-                            } catch (e) {
-                                console.warn('[PlayerStore] Failed to buffer next track:', e);
                             }
                         }
+                    } catch (e) {
+                        // Silent fail for background buffering
                     }
                 }
-
-                set({ currentTrack: newTrack });
-            }
+            }, 50);
         });
         listenerCleanups.push(() => sub3.remove());
 
         const sub4 = TrackPlayer.addEventListener(Event.PlaybackState, (event: any) => {
-            set({ isPlaying: event.state === 'playing' });
+            const isPlayingState = event.state === 'playing' || event.state === 'buffering' || event.state === 'loading';
+            set((state) => (state.isPlaying !== isPlayingState ? { isPlaying: isPlayingState } : {}));
         });
         listenerCleanups.push(() => sub4.remove());
 
@@ -273,7 +313,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 return; // Skip this update
             }
             lastProgressUpdate = now;
-
             // Only update duration if TrackPlayer reports a valid one (> 0)
             // Transcoded streams may not report duration correctly
             const newDuration = event.duration > 0 ? event.duration * 1000 : existingDuration;
@@ -382,55 +421,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     },
 
     playTrack: async (track) => {
-        // Reset skip accumulator on direct play
-        pendingSkips = 0;
-        if (skipTimer) {
-            clearTimeout(skipTimer);
-            skipTimer = null;
-        }
-
         set({ playbackError: null }); // Clear previous errors
 
+        // INSTANT UI UPDATE: Update store BEFORE native calls so UI reflects immediately
+        const { queue } = get();
+        let currentIndex = queue.findIndex(t => t.id === track.id);
+        if (currentIndex === -1) {
+            set({ queue: [track], originalQueue: [track], currentTrack: track, isPlaying: true, positionMillis: 0, durationMillis: track.durationMillis || 0 });
+            currentIndex = 0;
+        } else {
+            set({ currentTrack: track, isPlaying: true, positionMillis: 0, durationMillis: track.durationMillis || 0 });
+        }
+
+        // BACKGROUND: All native player operations happen after UI is updated
         try {
             const streamUrl = await getStreamUrl(track);
-
-            // Determine next track for buffering
-            let { queue, repeatMode, shuffleMode } = get();
-
-            // If track is not in queue, add it (ensures single songs can repeat)
-            let currentIndex = queue.findIndex(t => t.id === track.id);
-            if (currentIndex === -1) {
-                // Track not in queue - create a single-track queue
-                queue = [track];
-                set({ queue: [track], originalQueue: [track] });
-                currentIndex = 0;
-            }
-
-            let nextTrack: Track | undefined;
-
-            if (repeatMode === 'one') {
-                nextTrack = track;
-            } else if (currentIndex < queue.length - 1 && currentIndex !== -1) {
-                nextTrack = queue[currentIndex + 1];
-            } else if (repeatMode === 'all') {
-                nextTrack = queue[0];
-            }
-
-            // Prepare next track object if it exists
-            let nextTrackParam = undefined;
-            if (nextTrack) {
-                const nextUrl = await getStreamUrl(nextTrack);
-                nextTrackParam = {
-                    id: nextTrack.id,
-                    url: nextUrl,
-                    title: nextTrack.name,
-                    artist: nextTrack.artist,
-                    artwork: nextTrack.imageUrl && !nextTrack.imageUrl.startsWith('data:') ? nextTrack.imageUrl : undefined,
-                    duration: (nextTrack.durationMillis || 0) / 1000
-                };
-            }
-
-            // Play via AudioService (Seamless Mode)
             const artworkUrl = track.imageUrl && !track.imageUrl.startsWith('data:')
                 ? track.imageUrl
                 : undefined;
@@ -442,21 +447,41 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 artist: track.artist,
                 artwork: artworkUrl,
                 duration: (track.durationMillis || 0) / 1000
-            }, nextTrackParam);
-
-            set({
-                currentTrack: track,
-                isPlaying: true,
-                positionMillis: 0,
-                durationMillis: track.durationMillis || 0
             });
 
-            // Persist queue state for instant restoration on next wake
-            persistQueueState();
+            // Pre-fetch next track in background
+            const { queue: currentQueue, repeatMode } = get();
+            const idx = currentQueue.findIndex(t => t.id === track.id);
+            let nextTrack: Track | undefined;
+            if (repeatMode === 'one') {
+                nextTrack = track;
+            } else if (idx < currentQueue.length - 1) {
+                nextTrack = currentQueue[idx + 1];
+            } else if (repeatMode === 'all') {
+                nextTrack = currentQueue[0];
+            }
 
+            if (nextTrack) {
+                const nt = nextTrack;
+                setTimeout(async () => {
+                    try {
+                        const nextUrl = await getStreamUrl(nt);
+                        await audioService.addToQueue({
+                            id: nt.id,
+                            url: nextUrl,
+                            title: nt.name,
+                            artist: nt.artist,
+                            artwork: nt.imageUrl && !nt.imageUrl.startsWith('data:') ? nt.imageUrl : undefined,
+                            duration: (nt.durationMillis || 0) / 1000
+                        });
+                    } catch (e) { /* silent */ }
+                }, 200);
+            }
+
+            persistQueueState();
         } catch (error: any) {
             console.error('Failed to play track:', error);
-            set({ playbackError: error.message || 'Failed to start playback' });
+            set({ playbackError: error.message || 'Failed to start playback', isPlaying: false });
         }
     },
 
@@ -486,14 +511,64 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     },
 
     setQueue: (tracks) => {
-        const tracksWithIds = tracks.map(t => ({ ...t, queueItemId: t.queueItemId || `${t.id}-${Date.now()}-${Math.random()}` }));
+        const { queueLimit } = useSettingsStore.getState();
+        let limitedTracks = tracks;
+        if (queueLimit > 0 && tracks.length > queueLimit) {
+            limitedTracks = tracks.slice(0, queueLimit);
+        }
+
+        // Preserve existing queueItemIds if they exist, otherwise generate ONE stable ID per track
+        // This prevents massive re-renders when the queue is updated or shuffled
+        const tracksWithIds = limitedTracks.map(t => {
+            if (t.queueItemId) return t;
+            return {
+                ...t,
+                queueItemId: `${t.id}-${Math.random().toString(36).substring(2, 9)}`
+            };
+        });
+
         set({ queue: tracksWithIds, originalQueue: [], shuffleMode: false });
         persistQueueState();
     },
 
+    // DEEP OPTIMIZATION: Map tracks in the store to avoid component-level overhead
+    setRawQueue: (rawTracks: any[], dataSource: string, itemId: string, itemType: string) => {
+        const { queueLimit } = useSettingsStore.getState();
+        const isLocal = dataSource === 'local';
+        const serverUrl = useAuthStore.getState().serverUrl;
+        const token = useAuthStore.getState().user?.token;
+
+        const mapped = rawTracks.slice(0, queueLimit > 0 ? queueLimit : undefined).map((t: any) => ({
+            id: t.Id || t.id,
+            name: t.Name || t.name,
+            artist: t.AlbumArtist || t.Artists?.[0] || t.artist || 'Unknown',
+            album: t.Album || t.album || 'Unknown',
+            imageUrl: t.ImageUrl || t.imageUrl || (dataSource === 'jellyfin' ? `${serverUrl}/Items/${t.Id}/Images/Primary?api_key=${token}` : ''),
+            imageBlurHash: t.ImageBlurHashes?.Primary ? Object.values(t.ImageBlurHashes.Primary)[0] as string : undefined,
+            durationMillis: t.RunTimeTicks ? t.RunTimeTicks / 10000 : (t.durationMillis || 0),
+            streamUrl: t.streamUrl || '',
+            artistId: t.ArtistItems?.[0]?.Id || t.artistId || '',
+            playlistId: itemType === 'Playlist' ? itemId : undefined,
+            playlistItemId: t.PlaylistItemId,
+            bitrate: isLocal ? t.bitrate : t.MediaSources?.[0]?.Bitrate,
+            codec: isLocal ? t.codec : (t.MediaSources?.[0]?.Codec || t.MediaSources?.[0]?.MediaStreams?.find((s: any) => s.Type === 'Audio')?.Codec),
+            lyrics: isLocal ? t.lyrics : undefined,
+            queueItemId: `${t.Id || t.id}-${Math.random().toString(36).substring(2, 9)}`
+        }));
+
+        set({ queue: mapped, originalQueue: [], shuffleMode: false });
+        persistQueueState();
+        return mapped;
+    },
+
     addToQueueNext: (track) => {
         const { queue, currentTrack } = get();
-        const trackWithId = { ...track, queueItemId: `${track.id}-${Date.now()}-${Math.random()}` };
+        const { queueLimit } = useSettingsStore.getState();
+        if (queueLimit > 0 && queue.length >= queueLimit) return; // Queue full
+        const trackWithId = {
+            ...track,
+            queueItemId: track.queueItemId || `${track.id}-${Math.random().toString(36).substring(2, 9)}`
+        };
 
         if (!currentTrack) {
             set({ queue: [trackWithId, ...queue] });
@@ -508,7 +583,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     addToQueueEnd: (track) => {
         const { queue } = get();
-        const trackWithId = { ...track, queueItemId: `${track.id}-${Date.now()}-${Math.random()}` };
+        const { queueLimit } = useSettingsStore.getState();
+        if (queueLimit > 0 && queue.length >= queueLimit) return; // Queue full
+        const trackWithId = {
+            ...track,
+            queueItemId: track.queueItemId || `${track.id}-${Math.random().toString(36).substring(2, 9)}`
+        };
         set({ queue: [...queue, trackWithId] });
         persistQueueState();
     },
@@ -547,105 +627,76 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         const { queue, currentTrack, playTrack, repeatMode } = get();
         if (!currentTrack || queue.length === 0) return;
 
-        pendingSkips++;
+        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        if (currentIndex === -1) return;
 
-        if (skipTimer) {
-            clearTimeout(skipTimer);
+        // Calculate target index
+        let targetIndex = currentIndex + 1;
+
+        // Handle looping/bounds based on repeatMode
+        if (repeatMode === 'one') {
+            targetIndex = currentIndex; // Repeat one
+        } else if (repeatMode === 'all') {
+            targetIndex = targetIndex % queue.length;
+        } else {
+            // Repeat off: Clamp to end
+            if (targetIndex >= queue.length) return; // Do nothing if at end and not repeating
         }
 
-        skipTimer = setTimeout(async () => {
-            const skips = pendingSkips;
-            pendingSkips = 0;
-            skipTimer = null;
+        if (targetIndex === currentIndex && repeatMode !== 'one') return;
 
-            if (skips === 0) return;
+        const targetTrack = queue[targetIndex];
 
-            const { queue, currentTrack } = get(); // Re-get state
-            if (!currentTrack) return;
+        // Seamless Skip Check
+        try {
+            const nativeQueue = await audioService.getQueue();
+            const currentNativeIndex = await audioService.getActiveTrackIndex();
 
-            const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
-            if (currentIndex === -1) return;
+            if (currentNativeIndex !== undefined && nativeQueue && nativeQueue.length > 0) {
+                const targetNativeIndex = nativeQueue.findIndex(t => t.id === targetTrack.id);
 
-            // Calculate target index
-            let targetIndex = currentIndex + skips;
-
-            // Handle looping/bounds based on repeatMode
-            if (repeatMode === 'one' && skips === 1) {
-                targetIndex = currentIndex; // Repeat one
-            } else if (repeatMode === 'all') {
-                targetIndex = targetIndex % queue.length;
-                if (targetIndex < 0) targetIndex += queue.length;
-            } else {
-                // Repeat off: Clamp to end
-                if (targetIndex >= queue.length) targetIndex = queue.length - 1;
-            }
-
-            if (targetIndex === currentIndex && repeatMode !== 'one') return;
-
-            const targetTrack = queue[targetIndex];
-
-            // Seamless Skip Check
-            try {
-                const nativeQueue = await audioService.getQueue();
-                const currentNativeIndex = await audioService.getActiveTrackIndex();
-
-                if (currentNativeIndex !== undefined && nativeQueue && nativeQueue.length > 0) {
-                    // Calculate relative offset in native queue
-                    // It's safer to find by ID
-                    const targetNativeIndex = nativeQueue.findIndex(t => t.id === targetTrack.id);
-
-                    // Only skip if found AND it's different (unless repeating one)
-                    if (targetNativeIndex !== -1 && (targetNativeIndex !== currentNativeIndex || repeatMode === 'one')) {
-
-                        await audioService.skip(targetNativeIndex);
-                        return;
-                    }
+                // Only skip if found AND it's different (unless repeating one)
+                if (targetNativeIndex !== -1 && (targetNativeIndex !== currentNativeIndex || repeatMode === 'one')) {
+                    await audioService.skip(targetNativeIndex);
+                    return;
                 }
-            } catch (e) {
-                // Seamless skip check failed, will use full reload
             }
+        } catch (e) {
+            // Seamless skip check failed, will use full reload
+        }
 
-            await playTrack(targetTrack);
-        }, 300);
+        await playTrack(targetTrack);
     },
 
     playPrevious: async () => {
-        const { queue, currentTrack, playTrack } = get();
+        const { queue, currentTrack, playTrack, repeatMode, positionMillis, seek } = get();
         if (!currentTrack) return;
 
-        pendingSkips--; // Negative for previous
-
-        if (skipTimer) {
-            clearTimeout(skipTimer);
+        // Standard UX: If we are more than 3 seconds into a track, pressing "previous" should just restart it.
+        if (positionMillis > 3000) {
+            await seek(0);
+            return;
         }
 
-        skipTimer = setTimeout(async () => {
-            const skips = pendingSkips;
-            pendingSkips = 0;
-            skipTimer = null;
+        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        if (currentIndex === -1) return;
 
-            if (skips === 0) return;
+        let targetIndex = currentIndex - 1;
 
-            const { queue, currentTrack, repeatMode } = get();
-            if (!currentTrack) return;
-
-            const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
-            if (currentIndex === -1) return;
-
-            let targetIndex = currentIndex + skips;
-
-            if (targetIndex < 0) {
-                if (repeatMode === 'all') {
-                    targetIndex = (targetIndex % queue.length + queue.length) % queue.length;
-                } else {
-                    targetIndex = 0;
-                }
+        if (targetIndex < 0) {
+            if (repeatMode === 'all') {
+                targetIndex = queue.length - 1;
+            } else {
+                targetIndex = 0; // Just restart first track if not repeating
             }
+        }
 
-            if (targetIndex === currentIndex) return;
+        if (targetIndex === currentIndex) {
+            await seek(0);
+            return;
+        }
 
-            await playTrack(queue[targetIndex]);
-        }, 300);
+        await playTrack(queue[targetIndex]);
     },
 
     seek: async (positionMillis) => {
@@ -657,16 +708,34 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     },
 
     toggleShuffle: () => {
-        const { shuffleMode, queue, originalQueue } = get();
+        const { shuffleMode, queue, currentTrack, originalQueue } = get();
+        const { queueLimit } = useSettingsStore.getState();
         const newMode = !shuffleMode;
 
         if (newMode) {
-            // Shuffle on: Save original order, shuffle queue
-            const shuffled = [...queue].sort(() => Math.random() - 0.5);
-            set({ shuffleMode: true, originalQueue: [...queue], queue: shuffled });
+            // Save original order as-is (no copy needed — we only read it later)
+            const original = queue;
+            // Single copy + in-place Fisher-Yates shuffle O(n)
+            const shuffled = [...queue];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            // Move current track to front so playback continues naturally
+            if (currentTrack) {
+                const idx = shuffled.findIndex(t => t.id === currentTrack.id);
+                if (idx > 0) {
+                    [shuffled[0], shuffled[idx]] = [shuffled[idx], shuffled[0]];
+                }
+            }
+            // Respect queueLimit
+            const limited = (queueLimit > 0 && shuffled.length > queueLimit)
+                ? shuffled.slice(0, queueLimit)
+                : shuffled;
+            set({ shuffleMode: true, originalQueue: original, queue: limited });
         } else {
-            // Shuffle off: Restore original order
-            set({ shuffleMode: false, queue: originalQueue.length ? [...originalQueue] : queue });
+            // Shuffle off: Restore original order (no copy — original is immutable from our perspective)
+            set({ shuffleMode: false, queue: originalQueue.length ? originalQueue : queue });
         }
         persistQueueState();
     },

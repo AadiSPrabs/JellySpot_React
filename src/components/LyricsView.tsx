@@ -6,6 +6,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import ActionSheet from './ActionSheet';
 import { lyricsService } from '../services/LyricsService';
+import { Switch } from 'react-native-paper';
 
 import { useShallow } from 'zustand/react/shallow';
 
@@ -28,7 +29,7 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
         currentTrack: state.currentTrack,
         seek: state.seek,
     })));
-    const { lyricsOffsets, setLyricsOffset, translationLanguages, setTranslationLanguage } = useSettingsStore();
+    const { lyricsOffsets, setLyricsOffset, translationLanguages, setTranslationLanguage, preferJellyfinLyrics, setPreferJellyfinLyrics, dataSource } = useSettingsStore();
     const currentOffset = lyricsOffsets[itemId] || 0;
     const currentTranslationLanguage = translationLanguages[itemId] || 'none';
 
@@ -193,7 +194,9 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
     useEffect(() => {
         if (!lyrics.length) return;
 
-        const adjustedTime = positionMillis + currentOffset;
+        // Systemic adjustment: adding 500ms to positionMillis to compensate for reported latency
+        // This makes lyrics highlight "earlier" (500ms lead)
+        const adjustedTime = positionMillis + currentOffset + 500;
         const activeIndex = lyrics.findIndex((line, index) => {
             const nextLine = lyrics[index + 1];
             return adjustedTime >= line.time && (!nextLine || adjustedTime < nextLine.time);
@@ -220,7 +223,7 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
     };
 
     const renderItem = ({ item, index }: { item: LyricLine, index: number }) => {
-        const adjustedTime = positionMillis + currentOffset;
+        const adjustedTime = positionMillis + currentOffset + 500;
         const nextLine = lyrics[index + 1];
         const isActive = item.time !== -1 && adjustedTime >= item.time && (!nextLine || adjustedTime < nextLine.time);
 
@@ -264,24 +267,24 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
         );
     };
 
-    if (loading) {
-        return (
-            <View style={styles.center}>
-                <ActivityIndicator size="small" color={activeTextColor} />
-            </View>
-        );
-    }
+    const renderContent = () => {
+        if (loading) {
+            return (
+                <View style={[styles.center, { flex: 1 }]}>
+                    <ActivityIndicator size="small" color={activeTextColor} />
+                </View>
+            );
+        }
 
-    if (error || lyrics.length === 0) {
-        return (
-            <View style={styles.center}>
-                <Text style={{ color: inactiveTextColor }}>No lyrics found</Text>
-            </View>
-        );
-    }
+        if (error || lyrics.length === 0) {
+            return (
+                <View style={[styles.center, { flex: 1 }]}>
+                    <Text style={{ color: inactiveTextColor }}>{error || 'No lyrics found'}</Text>
+                </View>
+            );
+        }
 
-    return (
-        <View style={styles.container}>
+        return (
             <FlatList
                 ref={flatListRef}
                 data={lyrics}
@@ -295,6 +298,12 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
                     }, 500);
                 }}
             />
+        );
+    };
+
+    return (
+        <View style={styles.container}>
+            {renderContent()}
 
             {/* Settings Button */}
             <TouchableOpacity
@@ -374,6 +383,28 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
                             handleOpenOffsetDialog();
                         }}
                     />
+                    {dataSource !== 'local' && (
+                        <List.Item
+                            title="Prefer Jellyfin Lyrics"
+                            description="Use lyrics from your server instead of LRCLIB"
+                            left={props => <List.Icon {...props} icon="server" />}
+                            right={props => (
+                                <View style={{ justifyContent: 'center' }}>
+                                    <Switch
+                                        value={preferJellyfinLyrics}
+                                        onValueChange={(val) => {
+                                            setPreferJellyfinLyrics(val);
+                                            setRefreshTrigger(prev => prev + 1);
+                                        }}
+                                    />
+                                </View>
+                            )}
+                            onPress={() => {
+                                setPreferJellyfinLyrics(!preferJellyfinLyrics);
+                                setRefreshTrigger(prev => prev + 1);
+                            }}
+                        />
+                    )}
                 </View>
             </ActionSheet>
 

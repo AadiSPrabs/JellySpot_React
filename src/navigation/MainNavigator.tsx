@@ -155,7 +155,7 @@ function SearchStackNavigator() {
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
     return (
-        <SearchStack.Navigator key={dataSource} screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
+        <SearchStack.Navigator screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
             <SearchStack.Screen name="Search" component={SearchScreen} />
             <SearchStack.Screen name="Detail" component={DetailScreen} />
             <SearchStack.Screen name="Dependencies" component={DependenciesScreen} />
@@ -167,7 +167,7 @@ function LibraryStackNavigator() {
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
     return (
-        <LibraryStack.Navigator key={dataSource} screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
+        <LibraryStack.Navigator screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
             <LibraryStack.Screen name="Library" component={LibraryScreen} />
             <LibraryStack.Screen name="Detail" component={DetailScreen} />
             <LibraryStack.Screen name="Settings" component={SettingsScreen} />
@@ -200,14 +200,15 @@ export default function MainNavigator() {
     const isLocalOnly = sourceMode === 'local' || (sourceMode === 'both' && dataSource === 'local');
 
     return (
-        <View style={{
-            flex: 1,
-            backgroundColor: theme.colors.background,
-            paddingLeft: isLandscape ? LEFT_BAR_WIDTH : 0,
-            // Note: paddingBottom removed for portrait - sceneContainerStyle handles it
-        }}>
+        <View
+            style={{
+                flex: 1,
+                backgroundColor: theme.colors.background,
+                paddingLeft: isLandscape ? LEFT_BAR_WIDTH : 0,
+                // Note: paddingBottom removed for portrait - sceneContainerStyle handles it
+            }}
+        >
             <Tab.Navigator
-                key={isLocalOnly ? 'local-only' : 'with-jellyfin'}
                 screenOptions={{
                     headerShown: false,
                     sceneStyle: {

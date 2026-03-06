@@ -240,7 +240,8 @@ const styles = StyleSheet.create({
     buttonRow: {
         flexDirection: 'row',
         paddingHorizontal: 16,
-        paddingBottom: 12,
+        paddingTop: 12,
+        paddingBottom: 16,
     },
     helpText: {
         paddingHorizontal: 16,

@@ -29,7 +29,7 @@ class AudioService {
                     Capability.Stop,
                 ],
                 // compactCapabilities removed as it is not in UpdateOptions type
-                progressUpdateEventInterval: 1,
+                progressUpdateEventInterval: 0.5,
             });
             this.isSetup = true;
         } catch (error) {
@@ -46,94 +46,23 @@ class AudioService {
         artist: string;
         artwork?: string;
         duration?: number
-    }, nextTrack?: {
-        id: string;
-        url: string;
-        title: string;
-        artist: string;
-        artwork?: string;
-        duration?: number
     }) {
         await this.setup();
 
         try {
-            const queue = await TrackPlayer.getQueue();
-
-            // Prepare tracks to add
-            const tracksToAdd = [{
+            // Always clean reset → add → play (3 bridge calls, minimal JS thread blocking)
+            await TrackPlayer.reset();
+            await TrackPlayer.add({
                 id: track.id,
                 url: track.url,
                 title: track.title,
                 artist: track.artist,
                 artwork: track.artwork,
                 duration: track.duration,
-            }];
-
-            if (nextTrack) {
-                tracksToAdd.push({
-                    id: nextTrack.id,
-                    url: nextTrack.url,
-                    title: nextTrack.title,
-                    artist: nextTrack.artist,
-                    artwork: nextTrack.artwork,
-                    duration: nextTrack.duration,
-                });
-            }
-
-            // Smart Play Strategy: Avoid reset if possible to prevent flicker
-            if (queue.length > 0) {
-                // Check for queue bloat - reset if too large to prevent memory issues
-                if (queue.length > 50) {
-                    await TrackPlayer.reset();
-                    await TrackPlayer.add(tracksToAdd);
-                    await TrackPlayer.play();
-                    return;
-                }
-
-                const insertIndex = queue.length;
-                await TrackPlayer.add(tracksToAdd);
-                await TrackPlayer.skip(insertIndex);
-                await TrackPlayer.play();
-
-                // Optional: Clean up old tracks to keep queue small?
-                // For now, let's keep it simple.
-            } else {
-                // Empty queue, just add and play (reset effectively does this but maybe cleaner to explicit add)
-                await TrackPlayer.reset(); // Ensure clean state
-                await TrackPlayer.add(tracksToAdd);
-                await TrackPlayer.play();
-            }
-
+            });
+            await TrackPlayer.play();
         } catch (error) {
-            console.warn("[AudioService] Play failed with smart strategy, trying fallback reset:", error);
-            try {
-                await TrackPlayer.reset();
-
-                const tracksToAdd = [{
-                    id: track.id,
-                    url: track.url,
-                    title: track.title,
-                    artist: track.artist,
-                    artwork: track.artwork,
-                    duration: track.duration,
-                }];
-
-                if (nextTrack) {
-                    tracksToAdd.push({
-                        id: nextTrack.id,
-                        url: nextTrack.url,
-                        title: nextTrack.title,
-                        artist: nextTrack.artist,
-                        artwork: nextTrack.artwork,
-                        duration: nextTrack.duration,
-                    });
-                }
-
-                await TrackPlayer.add(tracksToAdd);
-                await TrackPlayer.play();
-            } catch (resetError) {
-                console.error("[AudioService] Hard reset failed:", resetError);
-            }
+            console.error('[AudioService] Play failed:', error);
         }
     }
 

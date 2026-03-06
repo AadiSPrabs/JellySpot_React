@@ -325,6 +325,24 @@ export const jellyfinApi = {
         return response.data;
     },
 
+    getFavoriteItems: async (limit = 20) => {
+        const api = getApiClient();
+        const { user } = useAuthStore.getState();
+        const parentIds = getSelectedParentIds();
+        const response = await api.get(`/Users/${user?.id}/Items`, {
+            params: {
+                Filters: 'IsFavorite',
+                IncludeItemTypes: 'Audio',
+                Limit: limit,
+                Recursive: true,
+                Fields: 'PrimaryImageAspectRatio,BasicSyncInfo,ImageBlurHashes,MediaSources',
+                ...(parentIds && { ParentId: parentIds }),
+            },
+            timeout: 20000
+        });
+        return response.data;
+    },
+
     // Delete an item (playlist, etc.) from the server
     deleteItem: async (itemId: string) => {
         const api = getApiClient();

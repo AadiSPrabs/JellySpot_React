@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -14,22 +14,23 @@ import { useShallow } from 'zustand/react/shallow';
 import MiniPlayer from './MiniPlayer';
 import PlayerScreen from '../screens/PlayerScreen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { audioService } from '../services/AudioService';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 // Height of the MiniPlayer roughly + bottom insets. We'll adjust as needed.
 const MINIPLAYER_HEIGHT = 64;
 const DRAG_THRESHOLD = 100;
 
 export default function GlobalPlayer() {
-    const { currentTrack, isPlayerExpanded, setPlayerExpanded } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlayerExpanded, setPlayerExpanded, heroCardVisible, isQueueVisible } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlayerExpanded: state.isPlayerExpanded,
-        setPlayerExpanded: state.setPlayerExpanded
+        setPlayerExpanded: state.setPlayerExpanded,
+        heroCardVisible: state.heroCardVisible,
+        isQueueVisible: state.isQueueVisible
     })));
 
-    const { width, height } = Dimensions.get('window');
-    const isLandscape = width > height;
+    const { width, height: SCREEN_HEIGHT } = useWindowDimensions();
+    const isLandscape = width > SCREEN_HEIGHT;
 
     // Offset from the bottom for MiniPlayer
     // Tab bar is explicitly 90px in MainNavigator. So we sit perfectly spaced above it.
@@ -39,31 +40,47 @@ export default function GlobalPlayer() {
 
     const SPRING_CONFIG = { damping: 25, stiffness: 200, overshootClamping: true };
 
-    const translateY = useSharedValue(COLLAPSED_Y);
+    const translateY = useSharedValue(COLLAPSED_Y + 200); // Initialize offscreen
     const startY = useSharedValue(0);
-    const [isVisible, setIsVisible] = useState(false);
+    const isExpandedShared = useSharedValue(isPlayerExpanded);
+
+    // Keep UI thread state in sync with JS state
+    useEffect(() => {
+        isExpandedShared.value = isPlayerExpanded;
+    }, [isPlayerExpanded, isExpandedShared]);
+
+
+    // Keep track of previous COLLAPSED_Y to animate on rotation
+    useEffect(() => {
+        // If track exists and player is NOT expanded, animate to new collapsed Y
+        if (currentTrack && !isPlayerExpanded) {
+            translateY.value = withSpring(COLLAPSED_Y, {
+                damping: 20,
+                stiffness: 150,
+                overshootClamping: true
+            });
+        }
+    }, [COLLAPSED_Y]);
 
     useEffect(() => {
         if (currentTrack) {
-            setIsVisible(true);
             // On track appearance, animate to correct position if it was hidden
             if (isPlayerExpanded) {
                 translateY.value = withSpring(EXPANDED_Y, SPRING_CONFIG);
+            } else if (heroCardVisible) {
+                // Hero card visible: slide mini player off-screen
+                translateY.value = withSpring(COLLAPSED_Y + 200, SPRING_CONFIG);
             } else {
                 translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
             }
         } else {
-            // Animate down, then unmount
-            translateY.value = withSpring(COLLAPSED_Y + 200, SPRING_CONFIG, (finished) => {
-                if (finished) {
-                    runOnJS(setIsVisible)(false);
-                }
-            });
+            // Animate down off-screen
+            translateY.value = withSpring(COLLAPSED_Y + 200, SPRING_CONFIG);
         }
-    }, [currentTrack, isPlayerExpanded, COLLAPSED_Y]);
+    }, [currentTrack, isPlayerExpanded, COLLAPSED_Y, heroCardVisible]);
 
     const dismissPlayer = () => {
-        audioService.stop();
+        usePlayerStore.getState().reset();
     };
 
     const panGesture = Gesture.Pan()
@@ -83,10 +100,11 @@ export default function GlobalPlayer() {
             translateY.value = newValue;
         })
         .onEnd((event) => {
-            if (isPlayerExpanded) {
+            if (isExpandedShared.value) {
                 // We are currently expanded; user can only drag DOWN to collapse.
                 if (translateY.value > EXPANDED_Y + (SCREEN_HEIGHT * 0.15) || event.velocityY > 500) {
                     translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
+                    isExpandedShared.value = false;
                     runOnJS(setPlayerExpanded)(false);
                 } else {
                     translateY.value = withSpring(EXPANDED_Y, SPRING_CONFIG);
@@ -95,16 +113,17 @@ export default function GlobalPlayer() {
                 // We are currently collapsed
                 if (translateY.value < COLLAPSED_Y - DRAG_THRESHOLD || event.velocityY < -500) {
                     translateY.value = withSpring(EXPANDED_Y, SPRING_CONFIG);
+                    isExpandedShared.value = true;
                     runOnJS(setPlayerExpanded)(true);
                 } else if (translateY.value > COLLAPSED_Y + 40 || event.velocityY > 500) {
                     // Swiped Down to stop/dismiss
                     runOnJS(dismissPlayer)();
-                    // The useEffect will handle the rest of the animation and unmounting.
                 } else {
                     translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
                 }
             }
-        });
+        })
+        .enabled(!isQueueVisible);
 
     const containerStyle = useAnimatedStyle(() => {
         return {
@@ -113,10 +132,10 @@ export default function GlobalPlayer() {
     });
 
     const miniPlayerStyle = useAnimatedStyle(() => {
-        // Fade in only at the very end of the collapse animation
+        // Fade out smoothly over the first 50% of the expansion drag
         const opacity = interpolate(
             translateY.value,
-            [COLLAPSED_Y - (SCREEN_HEIGHT * 0.2), COLLAPSED_Y],
+            [COLLAPSED_Y - (SCREEN_HEIGHT * 0.5), COLLAPSED_Y],
             [0, 1],
             Extrapolate.CLAMP
         );
@@ -138,8 +157,6 @@ export default function GlobalPlayer() {
             pointerEvents: opacity === 0 ? 'none' : 'auto'
         };
     });
-
-    if (!isVisible) return null;
 
     return (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">

@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Play, Pause, Music } from 'lucide-react-native';
 import { MiniProgressBar } from './MiniProgressBar';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
-import { runOnJS } from 'react-native-reanimated';
+
 import { audioService } from '../services/AudioService';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -25,14 +25,14 @@ interface MiniPlayerProps {
 }
 
 export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProps) {
-    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, reset, queue, repeatMode } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, reset, queueLength, repeatMode } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
         togglePlayPause: state.togglePlayPause,
         playNext: state.playNext,
         playPrevious: state.playPrevious,
         reset: state.reset,
-        queue: state.queue,
+        queueLength: state.queue.length,
         repeatMode: state.repeatMode
     })));
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -152,18 +152,21 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
 
                 // Vertical Swipe Down to Stop & Dismiss
                 if (translationY > 40 && Math.abs(translationY) > Math.abs(translationX)) {
-                    runOnJS(audioService.stop)();
+                    usePlayerStore.getState().reset();
                     return;
                 }
 
-                // Horizontal Swipes
+                // Horizontal Swipes — read queue from store snapshot to avoid subscribing
                 if (Math.abs(translationX) > 30) {
-                    const currentIndex = queue.findIndex(t => t.id === trackToRender?.id);
+                    const { queue: currentQueue } = usePlayerStore.getState();
+                    const currentIndex = currentQueue.findIndex(t => t.id === trackToRender?.id);
 
                     if (translationX > 0) {
                         // Swipe Right -> Previous
-                        if (currentIndex > 0 || repeatMode === 'one' || (repeatMode === 'all' && queue.length === 1)) {
+                        if (currentIndex > 0 || repeatMode === 'one' || (repeatMode === 'all' && currentQueue.length === 1)) {
                             transitionDirection.current = 'right';
+                            playPrevious();
+
                             Animated.parallel([
                                 Animated.timing(textTranslateX, {
                                     toValue: 50,
@@ -175,10 +178,8 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                                     duration: 150,
                                     useNativeDriver: true,
                                 })
-                            ]).start(async () => {
-                                await playPrevious();
-
-                                if (repeatMode === 'one' || (repeatMode === 'all' && queue.length === 1)) {
+                            ]).start(() => {
+                                if (repeatMode === 'one' || (repeatMode === 'all' && currentQueue.length === 1)) {
                                     textTranslateX.setValue(-50);
                                     Animated.parallel([
                                         Animated.spring(textTranslateX, { toValue: 0, useNativeDriver: true }),
@@ -189,8 +190,10 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                         }
                     } else {
                         // Swipe Left -> Next
-                        if (currentIndex < queue.length - 1 || repeatMode === 'one' || repeatMode === 'all') {
+                        if (currentIndex < currentQueue.length - 1 || repeatMode === 'one' || repeatMode === 'all') {
                             transitionDirection.current = 'left';
+                            playNext();
+
                             Animated.parallel([
                                 Animated.timing(textTranslateX, {
                                     toValue: -50,
@@ -202,10 +205,8 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                                     duration: 150,
                                     useNativeDriver: true,
                                 })
-                            ]).start(async () => {
-                                await playNext();
-
-                                if (repeatMode === 'one' || (repeatMode === 'all' && queue.length === 1)) {
+                            ]).start(() => {
+                                if (repeatMode === 'one' || (repeatMode === 'all' && currentQueue.length === 1)) {
                                     textTranslateX.setValue(50);
                                     Animated.parallel([
                                         Animated.spring(textTranslateX, { toValue: 0, useNativeDriver: true }),
@@ -217,8 +218,8 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                     }
                 }
             })
-            .runOnJS(true); // Needed because we use standard Animated instead of Reanimated here
-    }, [queue, trackToRender, playNext, playPrevious, repeatMode, textTranslateX, textOpacity]);
+            .runOnJS(true);
+    }, [trackToRender, playNext, playPrevious, repeatMode, textTranslateX, textOpacity]);
 
     if (!isVisible || !trackToRender) return null;
 
@@ -287,8 +288,8 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
 
                         <TouchableOpacity
                             onPress={togglePlayPause}
-                            style={styles.playButton}
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            style={[styles.playButton, { padding: 4 }]}
+                            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
                             accessibilityRole="button"
                             accessibilityLabel={isPlaying ? "Pause" : "Play"}
                         >

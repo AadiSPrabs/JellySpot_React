@@ -22,7 +22,7 @@ interface SongItemProps {
     isActive?: boolean;
 }
 
-export const SongItem = React.memo(({
+const SongItemComponent = ({
     item,
     index,
     isCurrent,
@@ -38,7 +38,7 @@ export const SongItem = React.memo(({
     isActive = false,
 }: SongItemProps) => {
     const theme = useTheme();
-    const scaleAnim = useRef(new Animated.Value(1)).current;
+
 
     // Use provided getImageUrl or fallback to jellyfinApi or item.ImageUrl
     const imageUri = getImageUrl
@@ -48,31 +48,11 @@ export const SongItem = React.memo(({
     const artistName = item.Artists?.[0] || item.AlbumArtist || item.artist || 'Unknown Artist';
     const trackName = item.Name || item.title || item.name || 'Unknown Track';
 
-    const handlePressIn = () => {
-        Animated.spring(scaleAnim, {
-            toValue: 0.97,
-            useNativeDriver: true,
-            speed: 50,
-            bounciness: 0,
-        }).start();
-    };
-
-    const handlePressOut = () => {
-        Animated.spring(scaleAnim, {
-            toValue: 1,
-            useNativeDriver: true,
-            speed: 50,
-            bounciness: 4,
-        }).start();
-    };
-
     return (
-        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+        <View>
             <Pressable
                 onPress={isSelectionMode ? onLongPress : onPress} // In selection mode, tap toggles selection (same as long press logic usually)
                 onLongPress={onLongPress}
-                onPressIn={handlePressIn}
-                onPressOut={handlePressOut}
                 style={({ pressed }) => [
                     styles.container,
                     {
@@ -155,9 +135,32 @@ export const SongItem = React.memo(({
                     )}
                 </View>
             </Pressable>
-        </Animated.View>
+        </View>
     );
-});
+};
+
+// Custom comparator to prevent massive re-renders when parent's inline functions change
+const areEqual = (prevProps: SongItemProps, nextProps: SongItemProps) => {
+    // Compare primitive values
+    if (prevProps.isCurrent !== nextProps.isCurrent) return false;
+    if (prevProps.isPlaying !== nextProps.isPlaying) return false;
+    if (prevProps.isSelectionMode !== nextProps.isSelectionMode) return false;
+    if (prevProps.isSelected !== nextProps.isSelected) return false;
+    if (prevProps.isActive !== nextProps.isActive) return false;
+    if (prevProps.showEqualizer !== nextProps.showEqualizer) return false;
+    if (prevProps.index !== nextProps.index) return false;
+
+    // Compare item identifiers (handle both Jellyfin 'Id' and internal 'id')
+    const prevId = prevProps.item?.Id || prevProps.item?.id;
+    const nextId = nextProps.item?.Id || nextProps.item?.id;
+    if (prevId !== nextId) return false;
+
+    // Deep check not needed for performance reasons; if you edit metadata 
+    // it might not reflect instantly, but preventing 600ms freezes is priority #1.
+    return true;
+};
+
+export const SongItem = React.memo(SongItemComponent, areEqual);
 
 const styles = StyleSheet.create({
     container: {

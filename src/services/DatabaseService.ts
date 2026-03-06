@@ -2,7 +2,7 @@ import { eq, like, desc, asc, and, or, sql, count } from 'drizzle-orm';
 import { db } from '../db/client';
 import * as FileSystem from 'expo-file-system/legacy';
 import { tracks, playlists, playlistTracks, playHistory, queueState, cachedTracks } from '../db/schema';
-import type { Track } from '../store/localLibraryStore';
+import { Track } from '../types/track';
 
 // Generate a random ID
 const generateId = () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -299,7 +299,7 @@ export const DatabaseService = {
     // --- Play History ---
 
     // Record a play event
-    async recordPlay(track: Track, source: 'local' | 'jellyfin', playDurationMs?: number, completedPlay: boolean = false) {
+    async recordPlay(track: Track, source: 'local' | 'jellyfin', playDurationMs?: number, completedPlay: boolean = false, playlistId?: string) {
         const id = generateId();
 
         // For Jellyfin tracks, cache the metadata so it can be viewed in Most Played later without fetching
@@ -320,6 +320,7 @@ export const DatabaseService = {
         await db.insert(playHistory).values({
             id,
             trackId: track.id,
+            playlistId: playlistId || null,
             playedAt: new Date(),
             playDurationMs,
             completedPlay,
@@ -419,6 +420,47 @@ export const DatabaseService = {
         } catch (error) {
             console.error('getRecentlyPlayed error:', error);
             return []; // Return empty array if table doesn't exist
+        }
+    },
+
+    // Get recently played playlists
+    getRecentPlaylists: async (source: 'local' | 'jellyfin', limit: number = 5) => {
+        try {
+            // Get unique playlistIds from playHistory, ordered by most recent play
+            const result = await db.select({
+                playlistId: playHistory.playlistId,
+                playedAt: sql`MAX(${playHistory.playedAt})`.as('lastPlayed')
+            })
+                .from(playHistory)
+                .where(and(
+                    eq(playHistory.source, source),
+                    sql`${playHistory.playlistId} IS NOT NULL`
+                ))
+                .groupBy(playHistory.playlistId)
+                .orderBy(desc(sql`lastPlayed`))
+                .limit(limit);
+
+            if (!result || result.length === 0) return [];
+
+            // Fetch full playlist details
+            const playlistsWithTime = await Promise.all(
+                result.map(async (r) => {
+                    const pid = r.playlistId;
+                    if (!pid) return null;
+
+                    if (source === 'local') {
+                        const p = await db.select().from(playlists).where(eq(playlists.id, pid)).limit(1);
+                        return p[0] ? { ...p[0], lastPlayed: r.playedAt } : null;
+                    } else {
+                        return { id: pid, lastPlayed: r.playedAt, isJellyfin: true };
+                    }
+                })
+            );
+
+            return playlistsWithTime.filter(p => p !== null);
+        } catch (error) {
+            console.error('getRecentPlaylists error:', error);
+            return [];
         }
     },
 

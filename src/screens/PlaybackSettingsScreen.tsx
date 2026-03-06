@@ -17,7 +17,9 @@ export default function PlaybackSettingsScreen() {
         showTechnicalDetails,
         setShowTechnicalDetails,
         lyricsSourcePreference,
-        setLyricsSourcePreference
+        setLyricsSourcePreference,
+        queueLimit,
+        setQueueLimit
     } = useSettingsStore();
 
     return (
@@ -104,6 +106,45 @@ export default function PlaybackSettingsScreen() {
                         onPress={() => setShowTechnicalDetails(!showTechnicalDetails)}
                         right={() => <Switch value={showTechnicalDetails} onValueChange={setShowTechnicalDetails} />}
                     />
+                </SettingsGroup>
+
+                <SettingsGroup title="Queue Management">
+                    <Text variant="bodySmall" style={{ paddingHorizontal: 16, paddingBottom: 8, color: theme.colors.onSurfaceVariant }}>
+                        Limit the maximum number of tracks in the queue to improve performance on the queue page.
+                    </Text>
+                    <RadioButton.Group
+                        onValueChange={value => {
+                            setQueueLimit(parseInt(value));
+                        }}
+                        value={queueLimit.toString()}
+                    >
+                        <SettingsItem
+                            title="100 Tracks"
+                            onPress={() => setQueueLimit(100)}
+                            right={() => <RadioButton value="100" />}
+                        />
+                        <SettingsItem
+                            title="250 Tracks"
+                            onPress={() => setQueueLimit(250)}
+                            right={() => <RadioButton value="250" />}
+                        />
+                        <SettingsItem
+                            title="500 Tracks (Default)"
+                            onPress={() => setQueueLimit(500)}
+                            right={() => <RadioButton value="500" />}
+                        />
+                        <SettingsItem
+                            title="1000 Tracks"
+                            onPress={() => setQueueLimit(1000)}
+                            right={() => <RadioButton value="1000" />}
+                        />
+                        <SettingsItem
+                            title="Unlimited"
+                            description="May cause lag on large queues!"
+                            onPress={() => setQueueLimit(0)}
+                            right={() => <RadioButton value="0" />}
+                        />
+                    </RadioButton.Group>
                 </SettingsGroup>
             </ScrollView>
         </SafeAreaView>

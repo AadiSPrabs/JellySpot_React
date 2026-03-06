@@ -60,13 +60,21 @@ export const initializeDatabase = () => {
                     played_at INTEGER NOT NULL,
                     play_duration_ms INTEGER,
                     completed_play INTEGER DEFAULT 0,
-                    source TEXT DEFAULT 'local' NOT NULL
+                    source TEXT DEFAULT 'local' NOT NULL,
+                    playlist_id TEXT
                 );
             `);
 
             // Migration: Add source column for existing installs
             try {
                 db.execSync("ALTER TABLE play_history ADD COLUMN source TEXT DEFAULT 'local' NOT NULL;");
+            } catch (e) {
+                // Ignore if exists
+            }
+
+            // Migration: Add playlist_id column for existing installs
+            try {
+                db.execSync("ALTER TABLE play_history ADD COLUMN playlist_id TEXT;");
             } catch (e) {
                 // Ignore if exists
             }

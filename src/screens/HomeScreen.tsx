@@ -6,13 +6,13 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { usePlayerStore } from '../store/playerStore';
 import { jellyfinApi } from '../api/jellyfin';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { HomeStackParamList } from '../types/navigation';
+import { HomeStackParamList, RootStackParamList } from '../types/navigation';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import { EmptyState } from '../components/EmptyState';
-import { HomeScreenSkeleton } from '../components/Skeleton';
+import { HomeScreenContentSkeleton } from '../components/Skeleton';
 import { SourceSwitcher } from '../components/SourceSwitcher';
 import { SongItem } from '../components/SongItem';
 import { useSettingsStore } from '../store/settingsStore';
@@ -23,6 +23,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
 import { dialogStyles } from '../utils/dialogStyles';
 import ActionSheet from '../components/ActionSheet';
+import { LinearGradient } from 'expo-linear-gradient';
+import { getColors } from 'react-native-image-colors';
+import { lightenHexColor } from '../utils/colorUtils';
+
 
 import { useShallow } from 'zustand/react/shallow';
 import { MediaItem } from '../types/track';
@@ -129,17 +133,23 @@ const animationState = { hasPlayed: false };
 export default function HomeScreen() {
     const [latestMusic, setLatestMusic] = useState<MediaItem[]>([]);
     const [resumeItems, setResumeItems] = useState<MediaItem[]>([]);
+    const [glowColor, setGlowColor] = useState<string | null>(null);
+
     const [recommendations, setRecommendations] = useState<MediaItem[]>([]);
     const [recommendedArtists, setRecommendedArtists] = useState<MediaItem[]>([]);
     const [mostPlayed, setMostPlayed] = useState<MediaItem[]>([]); // For local mode
-    const [recentlyPlayed, setRecentlyPlayed] = useState<MediaItem[]>([]); // For local mode
+    const [recentlyPlayed, setRecentlyPlayed] = useState<MediaItem[]>([]); // Unified history
+    const [recentlyPlayedPlaylists, setRecentlyPlayedPlaylists] = useState<any[]>([]); // Recent playlists
+    const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]); // For local mode
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [genres, setGenres] = useState<{ Id: string; Name: string }[]>([]);
 
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(20)).current;
+    const isFocused = useIsFocused();
     const { dataSource, sourceMode, localProfile, setLocalProfile } = useSettingsStore();
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
@@ -591,19 +601,12 @@ export default function HomeScreen() {
     // Animate content when source changes
     useEffect(() => {
         if (prevDataSource.current !== dataSource) {
-            // Fade out and slide up
-            Animated.parallel([
-                Animated.timing(contentOpacity, {
-                    toValue: 0,
-                    duration: 150,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(contentTranslateY, {
-                    toValue: -10,
-                    duration: 150,
-                    useNativeDriver: true,
-                }),
-            ]).start(() => {
+            // Fade out
+            Animated.timing(contentOpacity, {
+                toValue: 0,
+                duration: 150,
+                useNativeDriver: true,
+            }).start(() => {
                 // After fade out, reset position and fade in
                 contentTranslateY.setValue(10);
                 Animated.parallel([
@@ -623,46 +626,83 @@ export default function HomeScreen() {
         }
     }, [dataSource]);
 
-    // Typing animation state
-    const [displayedGreeting, setDisplayedGreeting] = useState(animationState.hasPlayed ? getGreeting() : '');
-    const [isTypingComplete, setIsTypingComplete] = useState(animationState.hasPlayed);
-    const fullGreeting = getGreeting();
-    const charIndexRef = useRef(0);
+    // Header Text Animation State
+    const [{ greeting, subtitle }] = useState(() => ({
+        greeting: getGreeting(),
+        subtitle: getQuirkySubtitle()
+    }));
+    const headerOpacity = useRef(new Animated.Value(animationState.hasPlayed ? 1 : 0)).current;
+    const headerTranslateX = useRef(new Animated.Value(animationState.hasPlayed ? 0 : -20)).current;
 
-    // Typing animation effect
+    // Header Slide & Fade entry effect
     useEffect(() => {
         if (animationState.hasPlayed) {
-            setDisplayedGreeting(fullGreeting);
-            setIsTypingComplete(true);
+            headerOpacity.setValue(1);
+            headerTranslateX.setValue(0);
             return;
         }
 
-        charIndexRef.current = 0;
-        setDisplayedGreeting('');
-
-        const typingSpeed = 100; // ms per character
-        let intervalId: NodeJS.Timeout;
-
-        const startDelay = setTimeout(() => {
-            intervalId = setInterval(() => {
-                charIndexRef.current += 1;
-                if (charIndexRef.current <= fullGreeting.length) {
-                    setDisplayedGreeting(fullGreeting.slice(0, charIndexRef.current));
-                } else {
-                    clearInterval(intervalId);
-                    setIsTypingComplete(true);
-                    animationState.hasPlayed = true;
-                }
-            }, typingSpeed);
-        }, 100);
-
-        return () => {
-            clearTimeout(startDelay);
-            if (intervalId) clearInterval(intervalId);
-        };
+        Animated.parallel([
+            Animated.timing(headerOpacity, {
+                toValue: 1,
+                duration: 600,
+                delay: 100, // slight delay for visual balance on app launch
+                useNativeDriver: true,
+            }),
+            Animated.spring(headerTranslateX, {
+                toValue: 0,
+                speed: 12,
+                bounciness: 2,
+                delay: 100,
+                useNativeDriver: true,
+            })
+        ]).start(() => {
+            animationState.hasPlayed = true;
+        });
     }, []);
 
+    // Extract dominant color for ambient glow
+    useEffect(() => {
+        let isCancelled = false;
+        if (!currentTrack?.imageUrl) {
+            setGlowColor(null);
+            return;
+        }
+
+        const fetchGlowColor = async () => {
+            try {
+                const colors = await getColors(currentTrack.imageUrl, {
+                    fallback: theme.colors.primary,
+                    cache: true,
+                    key: currentTrack.imageUrl,
+                });
+
+                if (!isCancelled) {
+                    let selectedColor: string | undefined;
+                    if (colors.platform === 'android') {
+                        selectedColor = colors.dominant || colors.vibrant || theme.colors.primary;
+                    } else if (colors.platform === 'ios') {
+                        selectedColor = colors.primary || colors.background || theme.colors.primary;
+                    }
+
+                    if (selectedColor) {
+                        // Brighten the color by 30% for a better "glow" effect as requested
+                        setGlowColor(lightenHexColor(selectedColor, 0.3));
+                    }
+                }
+            } catch (err) {
+                console.warn('HomeScreen glow color extraction failed:', err);
+                if (!isCancelled) setGlowColor(null);
+            }
+        };
+
+        fetchGlowColor();
+        return () => { isCancelled = true; };
+    }, [currentTrack?.imageUrl, theme.colors.primary]);
+
+
     const fetchData = async () => {
+        setLoading(true);
         setError(null);
         try {
             if (dataSource === 'local') {
@@ -715,14 +755,10 @@ export default function HomeScreen() {
                 setResumeItems([]); // No resume for local
                 setRecommendedArtists(localArtists); // Local artists
 
-                // Fetch Most Played and Recently Played from database
+                // Fetch Most Played from database
                 try {
-                    const [mostPlayedTracks, recentTracks] = await Promise.all([
-                        DatabaseService.getMostPlayed('local', 10),
-                        DatabaseService.getRecentlyPlayed('local', 10),
-                    ]);
+                    const mostPlayedTracks = await DatabaseService.getMostPlayed('local', 10);
 
-                    // Transform DB tracks to MediaItem format
                     const transformDbTrack = (t: any): MediaItem => ({
                         Id: t.id,
                         Name: t.name,
@@ -740,29 +776,81 @@ export default function HomeScreen() {
                     });
 
                     setMostPlayed(mostPlayedTracks.map(transformDbTrack));
-                    setRecentlyPlayed(recentTracks.map(transformDbTrack));
                 } catch (dbErr) {
                     console.error('Failed to fetch play history:', dbErr);
                     setMostPlayed([]);
+                }
+
+                // Get Favorites from local store
+                const localFavorites = localTracks.filter(t => t.isFavorite).map(track => ({
+                    Id: track.id,
+                    Name: track.name,
+                    Type: 'Audio',
+                    Artists: [track.artist],
+                    AlbumArtist: track.artist,
+                    Album: track.album,
+                    RunTimeTicks: track.durationMillis * 10000,
+                    UserData: { IsFavorite: true },
+                    streamUrl: track.streamUrl,
+                    imageUrl: track.imageUrl || '',
+                }));
+                // Shuffle favorites and take up to 10
+                setFavoriteItems(localFavorites.sort(() => Math.random() - 0.5).slice(0, 10));
+
+                // Get Recently Played from local database
+                try {
+                    const recentLocal = await DatabaseService.getRecentlyPlayed('local', 10);
+                    const transformDbTrack = (t: any): MediaItem => ({
+                        Id: t.id,
+                        Name: t.name,
+                        Type: 'Audio',
+                        Artists: [t.artist],
+                        AlbumArtist: t.artist,
+                        Album: t.album,
+                        RunTimeTicks: t.durationMillis * 10000,
+                        UserData: { IsFavorite: t.isFavorite || false },
+                        streamUrl: t.streamUrl,
+                        imageUrl: t.imageUrl || '',
+                    });
+                    setRecentlyPlayed(recentLocal.map(transformDbTrack));
+                } catch (err) {
+                    console.error('Failed to fetch local recently played:', err);
                     setRecentlyPlayed([]);
                 }
+
+                // Get Recently Played Playlists from local database
+                try {
+                    const recentPlaylists = await DatabaseService.getRecentPlaylists('local', 4);
+                    setRecentlyPlayedPlaylists(recentPlaylists);
+                } catch (err) {
+                    console.error('Failed to fetch local recently played playlists:', err);
+                    setRecentlyPlayedPlaylists([]);
+                }
+
+                // Extract unique genres from local tracks
+                const genreMap = new Map<string, string>();
+                localTracks.forEach(track => {
+                    if (track.genre && !genreMap.has(track.genre)) {
+                        genreMap.set(track.genre, track.genre);
+                    }
+                });
+                setGenres(Array.from(genreMap.values()).slice(0, 15).map(g => ({ Id: g, Name: g })));
 
             } else {
                 // Fetch from Jellyfin API robustly
                 // We fetch each section independently so one failure doesn't break the whole screen.
-                const [latestRes, resumeRes, recsRes, artistsRes] = await Promise.allSettled([
+                const [latestRes, resumeRes, recsRes, artistsRes, genresRes, favsRes] = await Promise.allSettled([
                     jellyfinApi.getLatestMusic(),
                     jellyfinApi.getResumeItems(),
                     jellyfinApi.getRecommendations(),
                     jellyfinApi.getRecommendedArtists(),
+                    jellyfinApi.getGenres(15),
+                    jellyfinApi.getFavoriteItems(10),
                 ]);
 
                 // Fetch unified isolated history from database for jellyfin
                 try {
-                    const [mostPlayedTracks, recentTracks] = await Promise.all([
-                        DatabaseService.getMostPlayed('jellyfin', 10),
-                        DatabaseService.getRecentlyPlayed('jellyfin', 10),
-                    ]);
+                    const mostPlayedTracks = await DatabaseService.getMostPlayed('jellyfin', 10);
                     // Database maps back to Track objects; convert them to MediaItem shapes for UI
                     const transformDbTrack = (t: any): MediaItem => ({
                         Id: t.id,
@@ -777,24 +865,79 @@ export default function HomeScreen() {
                         imageUrl: t.imageUrl || '',
                     });
                     setMostPlayed(mostPlayedTracks.map(transformDbTrack));
-                    setRecentlyPlayed(recentTracks.map(transformDbTrack));
                 } catch (dbErr) {
                     console.error('Failed to fetch Jellyfin play history:', dbErr);
                     setMostPlayed([]);
-                    setRecentlyPlayed([]);
                 }
 
-                if (latestRes.status === 'fulfilled') setLatestMusic(latestRes.value);
-                else console.error("Latest Music failed:", latestRes.reason);
+                if (latestRes.status === 'fulfilled') {
+                    const data = latestRes.value;
+                    setLatestMusic(Array.isArray(data) ? data : (data?.Items || []));
+                } else console.error("Latest Music failed:", latestRes.reason);
 
-                if (resumeRes.status === 'fulfilled') setResumeItems(resumeRes.value);
-                else console.error("Resume Items failed:", resumeRes.reason);
+                if (resumeRes.status === 'fulfilled') {
+                    const data = resumeRes.value;
+                    setResumeItems(Array.isArray(data) ? data : (data?.Items || []));
+                } else console.error("Resume Items failed:", resumeRes.reason);
 
                 if (recsRes.status === 'fulfilled') setRecommendations(recsRes.value.Items || []);
                 else console.error("Recommendations failed:", recsRes.reason);
 
                 if (artistsRes.status === 'fulfilled') setRecommendedArtists(artistsRes.value.Items || []);
                 else console.error("Artists failed:", artistsRes.reason);
+
+                if (genresRes.status === 'fulfilled') setGenres((genresRes.value.Items || []).slice(0, 15));
+                else console.error("Genres failed:", genresRes.reason);
+
+                if (favsRes.status === 'fulfilled') setFavoriteItems(favsRes.value.Items || []);
+                else console.error("Favorites failed:", favsRes.reason);
+
+                // Fetch Recently Played for Jellyfin from local database
+                try {
+                    const recentJelly = await DatabaseService.getRecentlyPlayed('jellyfin', 10);
+                    const transformDbTrack = (t: any): MediaItem => ({
+                        Id: t.id,
+                        Name: t.name,
+                        Type: 'Audio',
+                        Artists: [t.artist],
+                        AlbumArtist: t.artist,
+                        Album: t.album,
+                        RunTimeTicks: t.durationMillis ? t.durationMillis * 10000 : 0,
+                        UserData: { IsFavorite: t.isFavorite || false },
+                        streamUrl: t.streamUrl,
+                        imageUrl: t.imageUrl || '',
+                    });
+                    setRecentlyPlayed(recentJelly.map(transformDbTrack));
+                } catch (err) {
+                    console.error('Failed to fetch jellyfin recently played:', err);
+                    setRecentlyPlayed([]);
+                }
+
+                // Fetch Recently Played Playlists for Jellyfin (recorded locally)
+                try {
+                    const recentPlaylists = await DatabaseService.getRecentPlaylists('jellyfin', 4);
+                    // For Jellyfin, fetch the actual playlist names using the new getItem API
+                    const resolvedPlaylists = await Promise.all(
+                        recentPlaylists.map(async (p: any) => {
+                            try {
+                                const details = await jellyfinApi.getItem(p.id);
+                                return { ...p, name: details.Name || p.name };
+                            } catch (e) {
+                                return p;
+                            }
+                        })
+                    );
+                    setRecentlyPlayedPlaylists(resolvedPlaylists);
+                } catch (err) {
+                    console.error('Failed to fetch jellyfin recently played playlists:', err);
+                    setRecentlyPlayedPlaylists([]);
+                }
+
+                // Check if ALL Jellyfin API calls failed — show connection error
+                const allFailed = [latestRes, resumeRes, recsRes, artistsRes, genresRes, favsRes].every(r => r.status === 'rejected');
+                if (allFailed) {
+                    setError('Unable to connect to your Jellyfin server. Please check your network connection and server status.');
+                }
             }
 
             // Trigger entry animation
@@ -841,8 +984,20 @@ export default function HomeScreen() {
                 }
             }
         }
+
+        // Clear data immediately when source changes to trigger skeletons and prevent layout jumps
+        setLatestMusic([]);
+        setResumeItems([]);
+        setRecommendations([]);
+        setRecommendedArtists([]);
+        setMostPlayed([]);
+        setFavoriteItems([]);
+        setRecentlyPlayed([]);
+        setRecentlyPlayedPlaylists([]);
+        setGenres([]);
+
         fetchData();
-    }, [dataSource]);
+    }, [dataSource, isFocused]);
 
     // Subscribe to local library changes to auto-refresh when scan completes
     useEffect(() => {
@@ -899,6 +1054,210 @@ export default function HomeScreen() {
         }
         return jellyfinApi.getImageUrl(item.Id);
     };
+
+    // ========== NEW: Now Playing Hero Card ==========
+    const heroCardRef = useRef<View>(null);
+    const heroCardYRef = useRef(0);
+    const heroCardHeightRef = useRef(80);
+
+    // Track hero card visibility based on scroll position
+    const handleScroll = (event: any) => {
+        if (!currentTrack) {
+            if (usePlayerStore.getState().heroCardVisible) {
+                usePlayerStore.getState().setHeroCardVisible(false);
+            }
+            return;
+        }
+        const scrollY = event.nativeEvent.contentOffset.y;
+        const heroBottom = heroCardYRef.current + heroCardHeightRef.current;
+        const isVisible = scrollY < heroBottom;
+        const currentlyVisible = usePlayerStore.getState().heroCardVisible;
+        if (isVisible !== currentlyVisible) {
+            usePlayerStore.getState().setHeroCardVisible(isVisible);
+        }
+    };
+
+    // Reset hero card visibility when leaving screen
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('blur', () => {
+            usePlayerStore.getState().setHeroCardVisible(false);
+        });
+        return unsubscribe;
+    }, [navigation]);
+    const renderNowPlayingHero = () => {
+        if (!currentTrack) return null;
+        const imageUrl = currentTrack.imageUrl;
+        return (
+            <View
+                ref={heroCardRef}
+                onLayout={(e) => {
+                    heroCardYRef.current = e.nativeEvent.layout.y;
+                    heroCardHeightRef.current = e.nativeEvent.layout.height;
+                    if (currentTrack) usePlayerStore.getState().setHeroCardVisible(true);
+                }}
+            >
+                <Pressable
+                    onPress={() => usePlayerStore.getState().setPlayerExpanded(true)}
+                    style={{ marginHorizontal: 20, marginBottom: 24 }}
+                >
+                    <Surface style={{ borderRadius: 16, overflow: 'hidden' }} elevation={3}>
+                        <View style={{ height: 80, flexDirection: 'row', alignItems: 'center' }}>
+                            {imageUrl ? (
+                                <Image source={{ uri: imageUrl }} style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.25 }} blurRadius={30} contentFit="cover" />
+                            ) : null}
+                            <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: theme.colors.surfaceVariant, opacity: 0.7 }} />
+                            {imageUrl ? (
+                                <Image source={{ uri: imageUrl }} style={{ width: 56, height: 56, borderRadius: 10, marginLeft: 12 }} />
+                            ) : (
+                                <View style={{ width: 56, height: 56, borderRadius: 10, marginLeft: 12, backgroundColor: theme.colors.surfaceVariant, justifyContent: 'center', alignItems: 'center' }}>
+                                    <Icon name="music-note" size={28} color={theme.colors.onSurfaceVariant} />
+                                </View>
+                            )}
+                            <View style={{ flex: 1, marginLeft: 12, marginRight: 8 }}>
+                                <Text variant="labelSmall" style={{ color: theme.colors.primary, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>Now Playing</Text>
+                                <Text variant="titleSmall" numberOfLines={1} style={{ fontWeight: '600' }}>{currentTrack.name}</Text>
+                                <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{currentTrack.artist}</Text>
+                            </View>
+                            <IconButton
+                                icon={isPlaying ? 'pause' : 'play'}
+                                size={28}
+                                onPress={() => usePlayerStore.getState().togglePlayPause()}
+                                style={{ marginRight: 8 }}
+                            />
+                        </View>
+                    </Surface>
+                </Pressable>
+            </View>
+        );
+    };
+
+    // ========== NEW: Quick Access Grid ==========
+    const renderQuickAccessGrid = () => {
+        // Build quick access items from recently played + shortcuts
+        const quickItems: { id: string; name: string; imageUrl?: string; type: string; icon?: string }[] = [];
+
+        if (dataSource === 'local') {
+            quickItems.push({ id: 'all-songs', name: 'All Songs', type: 'Playlist', icon: 'music-note' });
+        }
+        quickItems.push({ id: 'liked-songs', name: 'Liked Songs', type: 'Playlist', icon: 'heart' });
+
+        // Add Recently Played Playlists
+        for (const p of recentlyPlayedPlaylists) {
+            if (quickItems.length >= 6) break;
+            if (quickItems.find(q => q.id === p.id)) continue;
+            quickItems.push({
+                id: p.id,
+                name: p.name || (p.isJellyfin ? 'Jellyfin Playlist' : 'Recent Playlist'),
+                type: 'Playlist',
+                icon: 'playlist-music'
+            });
+        }
+
+        // Combine pools to ensure the grid is populated with content 
+        // Priority: Favorites -> Recently Played -> Resume -> Latest
+        const gridPool = [
+            ...(Array.isArray(favoriteItems) ? favoriteItems : []),
+            ...(Array.isArray(recentlyPlayed) ? recentlyPlayed : []),
+            ...(Array.isArray(resumeItems) ? resumeItems : []),
+            ...(Array.isArray(latestMusic) ? latestMusic : []),
+        ];
+
+        for (const item of gridPool) {
+            if (quickItems.length >= 6) break;
+            if (quickItems.find(q => q.id === item.Id)) continue;
+            quickItems.push({
+                id: item.Id,
+                name: item.Name || 'Unknown',
+                imageUrl: getItemImageUrl(item),
+                type: item.Type || 'Audio',
+            });
+        }
+
+        if (quickItems.length === 0) {
+            if (!loading) return null;
+            // Return skeleton for quick items to maintain height
+            return (
+                <View style={{ paddingHorizontal: 20, marginBottom: 24 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                        {[...Array(6)].map((_, i) => (
+                            <View key={i} style={{ width: (width - 52) / 2, height: 56, borderRadius: 10, backgroundColor: theme.colors.surfaceVariant, opacity: 0.5 }} />
+                        ))}
+                    </View>
+                </View>
+            );
+        }
+
+        const chipWidth = (width - 52) / 2; // 20px padding each side + 12px gap
+
+        return (
+            <View style={{ paddingHorizontal: 20, marginBottom: 24 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                    {quickItems.map((item) => (
+                        <Pressable
+                            key={item.id}
+                            onPress={() => {
+                                if (item.type === 'Audio') {
+                                    const mediaItem = favoriteItems.find(r => r.Id === item.id) ||
+                                        recentlyPlayed.find(r => r.Id === item.id) ||
+                                        resumeItems.find(r => r.Id === item.id) ||
+                                        latestMusic.find(r => r.Id === item.id);
+                                    if (mediaItem) handleSongPress(mediaItem);
+                                } else {
+                                    navigation.navigate('Detail', { itemId: item.id, type: item.type });
+                                }
+                            }}
+                            style={{ width: chipWidth }}
+                        >
+                            <Surface style={{ borderRadius: 10, flexDirection: 'row', alignItems: 'center', height: 56, overflow: 'hidden', backgroundColor: theme.colors.surfaceVariant }} elevation={1}>
+                                {item.imageUrl ? (
+                                    <Image source={{ uri: item.imageUrl }} style={{ width: 56, height: 56 }} />
+                                ) : (
+                                    <View style={{ width: 56, height: 56, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.primary + '20' }}>
+                                        <Icon name={(item.icon || 'music-note') as any} size={24} color={theme.colors.primary} />
+                                    </View>
+                                )}
+                                <Text variant="labelLarge" numberOfLines={1} style={{ flex: 1, marginHorizontal: 10, fontWeight: '600' }}>{item.name}</Text>
+                            </Surface>
+                        </Pressable>
+                    ))}
+                </View>
+            </View>
+        );
+    };
+
+    // ========== NEW: Genre Chips Row ==========
+    const renderGenreChips = () => {
+        if (genres.length === 0) return null;
+        return (
+            <View style={styles.section}>
+                <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>Explore Genres</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}>
+                    {genres.map((genre) => (
+                        <Pressable
+                            key={genre.Id}
+                            onPress={() => navigation.navigate('Detail', { itemId: genre.Id, type: 'MusicGenre' })}
+                        >
+                            <Surface style={{ paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: theme.colors.secondaryContainer }} elevation={0}>
+                                <Text variant="labelLarge" style={{ color: theme.colors.onSecondaryContainer, fontWeight: '600' }}>{genre.Name}</Text>
+                            </Surface>
+                        </Pressable>
+                    ))}
+                </ScrollView>
+            </View>
+        );
+    };
+
+    // ========== NEW: Section Header with See All ==========
+    const renderSectionHeader = (title: string, onSeeAll?: () => void) => (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: 12 }}>
+            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>{title}</Text>
+            {onSeeAll && (
+                <Pressable onPress={onSeeAll} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+                    <Text variant="labelMedium" style={{ color: theme.colors.primary }}>See All</Text>
+                </Pressable>
+            )}
+        </View>
+    );
 
     // Grid item width calculation for landscape mode (subtract left tab bar width)
     const contentWidth = isLandscape ? width - LEFT_BAR_WIDTH : width;
@@ -962,131 +1321,154 @@ export default function HomeScreen() {
     const renderArtistItem = ({ item }: { item: MediaItem }) => {
         const imageUrl = dataSource === 'local' ? item.imageUrl : jellyfinApi.getImageUrl(item.Id);
         return (
-            <TouchableOpacity style={styles.artistContainer} onPress={() => handleItemPress(item)}>
-                <ImageWithFallback
-                    uri={imageUrl}
-                    style={styles.artistPlaceholder}
-                    fallbackIcon="account-music"
-                    iconSize={40}
-                    iconColor={theme.colors.onSurfaceVariant}
-                    backgroundColor={theme.colors.surfaceVariant}
-                    borderRadius={50}
-                />
-                <Text variant="titleMedium" style={styles.artistName} numberOfLines={1}>{item.Name}</Text>
+            <TouchableOpacity style={{ marginRight: 16, alignItems: 'center', width: 130 }} onPress={() => handleItemPress(item)}>
+                <View style={{ width: 130, height: 130, borderRadius: 65, overflow: 'hidden' }}>
+                    <ImageWithFallback
+                        uri={imageUrl}
+                        style={{ width: 130, height: 130, borderRadius: 65 }}
+                        fallbackIcon="account-music"
+                        iconSize={48}
+                        iconColor={theme.colors.onSurfaceVariant}
+                        backgroundColor={theme.colors.surfaceVariant}
+                        borderRadius={65}
+                    />
+                    {/* Name overlay at bottom of circle */}
+                    <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+                        <Text variant="labelMedium" numberOfLines={1} style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>{item.Name}</Text>
+                    </View>
+                </View>
             </TouchableOpacity>
         );
     };
 
-    // Initial loading state
-    if (loading && !refreshing && latestMusic.length === 0 && resumeItems.length === 0) {
-        return <HomeScreenSkeleton isLandscape={isLandscape} numColumns={numColumns} width={width} />;
-    }
-
+    // Whether to show the content skeleton (loading but not a pull-to-refresh)
+    const showContentSkeleton = loading && !refreshing && latestMusic.length === 0 && resumeItems.length === 0;
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
+            {/* Refined Ambient Glow: LinearGradient using dominant color */}
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 450, zIndex: 0 }} pointerEvents="none">
+                <LinearGradient
+                    colors={[
+                        glowColor ? `${glowColor}99` : 'transparent', // 60% opacity for more vibrance
+                        glowColor ? `${glowColor}59` : 'transparent', // 35% opacity
+                        glowColor ? `${glowColor}26` : 'transparent', // 15% opacity
+                        'transparent'
+                    ]}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                />
+                {/* Bottom fade-to-background */}
+                <LinearGradient
+                    colors={['transparent', theme.colors.background]}
+                    style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 150 }} // Deeper, smoother fade
+                />
+            </View>
             <ScrollView
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />
                 }
-                contentContainerStyle={{ paddingBottom: 180 }}
+                contentContainerStyle={{ paddingBottom: 180, minHeight: height }}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
             >
-                <Animated.View style={{
-                    opacity: Animated.multiply(fadeAnim, contentOpacity),
-                    transform: [{ translateY: Animated.add(slideAnim, contentTranslateY) }]
-                }}>
-                    <View style={[styles.header, isLandscape && { padding: 12, marginBottom: 4 }]}>
-                        {isSelectionMode ? (
-                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                                <IconButton icon="close" onPress={exitSelectionMode} />
-                                <Text variant="titleLarge" style={{ flex: 1, fontWeight: 'bold', marginLeft: 8 }}>
-                                    {selectedTracks.size} Selected
-                                </Text>
-                                <IconButton icon="dots-vertical" onPress={() => setIsSelectionMenuVisible(true)} />
-                                <ActionSheet
-                                    visible={isSelectionMenuVisible}
-                                    onClose={() => setIsSelectionMenuVisible(false)}
-                                    title="Selected Actions"
-                                    heightPercentage={40}
-                                >
-                                    <View style={{ gap: 4 }}>
+                <View style={[styles.header, isLandscape && { padding: 12, marginBottom: 4 }]}>
+                    {isSelectionMode ? (
+                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                            <IconButton icon="close" onPress={exitSelectionMode} />
+                            <Text variant="titleLarge" style={{ flex: 1, fontWeight: 'bold', marginLeft: 8 }}>
+                                {selectedTracks.size} Selected
+                            </Text>
+                            <IconButton icon="dots-vertical" onPress={() => setIsSelectionMenuVisible(true)} />
+                            <ActionSheet
+                                visible={isSelectionMenuVisible}
+                                onClose={() => setIsSelectionMenuVisible(false)}
+                                title="Selected Actions"
+                                heightPercentage={40}
+                            >
+                                <View style={{ gap: 4 }}>
+                                    <List.Item
+                                        title="Download Selected"
+                                        left={props => <List.Icon {...props} icon="download" />}
+                                        onPress={handleDownloadSelected}
+                                        disabled={dataSource === 'local'}
+                                    />
+                                    <List.Item
+                                        title="Add to Playlist"
+                                        left={props => <List.Icon {...props} icon="playlist-plus" />}
+                                        onPress={handleAddSelectedToPlaylist}
+                                    />
+                                    {dataSource === 'local' && (
                                         <List.Item
-                                            title="Download Selected"
-                                            left={props => <List.Icon {...props} icon="download" />}
-                                            onPress={handleDownloadSelected}
-                                            disabled={dataSource === 'local'}
+                                            title="Delete from Device"
+                                            left={props => <List.Icon {...props} icon="delete" color={theme.colors.error} />}
+                                            titleStyle={{ color: theme.colors.error }}
+                                            onPress={handleDeleteSelected}
                                         />
-                                        <List.Item
-                                            title="Add to Playlist"
-                                            left={props => <List.Icon {...props} icon="playlist-plus" />}
-                                            onPress={handleAddSelectedToPlaylist}
-                                        />
-                                        {dataSource === 'local' && (
-                                            <List.Item
-                                                title="Delete from Device"
-                                                left={props => <List.Icon {...props} icon="delete" color={theme.colors.error} />}
-                                                titleStyle={{ color: theme.colors.error }}
-                                                onPress={handleDeleteSelected}
-                                            />
-                                        )}
-                                    </View>
-                                </ActionSheet>
-                            </View>
-                        ) : (
-                            <View style={{ flex: 1 }}>
-                                <Text variant={isLandscape ? "titleLarge" : "headlineMedium"} style={{ fontWeight: 'bold' }}>
-                                    {displayedGreeting}
-                                    {!isTypingComplete && <Text style={{ color: theme.colors.primary }}>|</Text>}
+                                    )}
+                                </View>
+                            </ActionSheet>
+                        </View>
+                    ) : (
+                        <Animated.View style={{ flex: 1, opacity: headerOpacity, transform: [{ translateX: headerTranslateX }] }}>
+                            <Text variant={isLandscape ? "titleLarge" : "headlineMedium"} style={{ fontWeight: 'bold' }}>
+                                {greeting}
+                            </Text>
+                            {!isLandscape && (
+                                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    {subtitle}
                                 </Text>
-                                {!isLandscape && (
-                                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-                                        {getQuirkySubtitle()}
-                                    </Text>
-                                )}
-                            </View>
-                        )}
-
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            {/* Settings icon - show when profile won't navigate to settings */}
-                            {showSettingsIcon && (
-                                <IconButton
-                                    icon="cog"
-                                    size={24}
-                                    onPress={() => navigation.navigate('Settings')}
-                                />
                             )}
-                            {/* Profile avatar */}
-                            <TouchableOpacity onPress={handleProfilePress}>
-                                {isLocalOnlyMode ? (
-                                    // Local-only mode: show local profile avatar (editable)
-                                    localProfile.imageUri ? (
-                                        <Avatar.Image
-                                            size={40}
-                                            source={{ uri: localProfile.imageUri }}
-                                        />
-                                    ) : (
-                                        <Avatar.Icon size={40} icon="account" />
-                                    )
-                                ) : user?.id ? (
-                                    // Jellyfin mode: show Jellyfin user image
+                        </Animated.View>
+                    )}
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {/* Settings icon - show when profile won't navigate to settings */}
+                        {showSettingsIcon && (
+                            <IconButton
+                                icon="cog"
+                                size={24}
+                                onPress={() => navigation.navigate('Settings')}
+                            />
+                        )}
+                        {/* Profile avatar */}
+                        <TouchableOpacity onPress={handleProfilePress}>
+                            {isLocalOnlyMode ? (
+                                // Local-only mode: show local profile avatar (editable)
+                                localProfile.imageUri ? (
                                     <Avatar.Image
                                         size={40}
-                                        source={{ uri: jellyfinApi.getUserImageUrl(user.id) }}
+                                        source={{ uri: localProfile.imageUri }}
                                     />
                                 ) : (
                                     <Avatar.Icon size={40} icon="account" />
-                                )}
-                            </TouchableOpacity>
-                        </View>
+                                )
+                            ) : user?.id ? (
+                                // Jellyfin mode: show Jellyfin user image
+                                <Avatar.Image
+                                    size={40}
+                                    source={{ uri: jellyfinApi.getUserImageUrl(user.id) }}
+                                />
+                            ) : (
+                                <Avatar.Icon size={40} icon="account" />
+                            )}
+                        </TouchableOpacity>
                     </View>
+                </View>
 
-                    {/* Source Switcher - separate from header text */}
-                    {sourceMode === 'both' && (
-                        <View style={{ paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' }}>
-                            <SourceSwitcher />
-                        </View>
-                    )}
+                {/* Source Switcher - separate from header text */}
+                {sourceMode === 'both' && (
+                    <View style={{ paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' }}>
+                        <SourceSwitcher />
+                    </View>
+                )}
 
+                <Animated.View style={{
+                    minHeight: height,
+                    opacity: Animated.multiply(fadeAnim, contentOpacity),
+                    transform: [{ translateY: Animated.add(slideAnim, contentTranslateY) }]
+                }}>
                     {/* Playback Error Banner */}
                     {playbackError && dataSource !== 'local' && (
                         <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
@@ -1102,70 +1484,44 @@ export default function HomeScreen() {
                         </View>
                     )}
 
+                    {/* ====== 1. Now Playing Hero ====== */}
+                    {renderNowPlayingHero()}
+
+                    {/* ====== 2. Quick Access Grid ====== */}
+                    {renderQuickAccessGrid()}
+
+                    {/* Content Skeleton — shown during loading while header/switcher remain visible */}
+                    {showContentSkeleton && (
+                        <HomeScreenContentSkeleton isLandscape={isLandscape} numColumns={numColumns} width={width} />
+                    )}
+
                     {/* Network Error State (Initial Load) */}
                     {error && dataSource !== 'local' && !loading && latestMusic.length === 0 && (
-                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 }}>
-                            <Icon name="wifi-off" size={64} color={theme.colors.error} />
-                            <Text variant="titleLarge" style={{ marginTop: 16, marginBottom: 8, fontWeight: 'bold' }}>Connection Failed</Text>
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 24, textAlign: 'center', paddingHorizontal: 32 }}>
-                                {error}
-                            </Text>
-                            <Button mode="contained" onPress={fetchData} icon="refresh">
-                                Retry
-                            </Button>
+                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60 }}>
+                            <Surface style={{ borderRadius: 24, padding: 40, alignItems: 'center', width: '85%' }} elevation={2}>
+                                <Icon name="server-network-off" size={72} color={theme.colors.error} />
+                                <Text variant="headlineSmall" style={{ marginTop: 20, marginBottom: 8, fontWeight: 'bold', textAlign: 'center' }}>Can't Reach Server</Text>
+                                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 28, textAlign: 'center', lineHeight: 22 }}>
+                                    {error}
+                                </Text>
+                                <Button mode="contained" onPress={fetchData} icon="refresh" style={{ borderRadius: 24, paddingHorizontal: 16 }} contentStyle={{ height: 48 }}>
+                                    Try Again
+                                </Button>
+                            </Surface>
                         </View>
                     )}
+
                     {/* Empty state (Jellyfin only) when everything is empty */}
-                    {!loading && !error && dataSource !== 'local' && latestMusic.length === 0 && resumeItems.length === 0 && recommendations.length === 0 && recommendedArtists.length === 0 && mostPlayed.length === 0 && recentlyPlayed.length === 0 && (
+                    {!loading && !error && dataSource !== 'local' && latestMusic.length === 0 && resumeItems.length === 0 && recommendations.length === 0 && recommendedArtists.length === 0 && mostPlayed.length === 0 && favoriteItems.length === 0 && (
                         <EmptyState
                             icon='server-network-off'
                             title='No items found'
                             description='Your Jellyfin library seems to be empty.'
                         />
                     )}
-
-
-                    {/* Recently Played / Resume (Jellyfin only) */}
-                    {resumeItems.length > 0 && (
+                    {mostPlayed.length > 0 && (
                         <View style={styles.section}>
-                            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>Jump Back In</Text>
-                            <FlatList
-                                key={isLandscape ? 'grid-resume' : 'list-resume'}
-                                data={resumeItems}
-                                renderItem={renderItem}
-                                keyExtractor={(item) => item.Id}
-                                horizontal={!isLandscape}
-                                numColumns={isLandscape ? numColumns : 1}
-                                showsHorizontalScrollIndicator={false}
-                                scrollEnabled={!isLandscape}
-                                contentContainerStyle={styles.listContent}
-                                initialNumToRender={5}
-                                maxToRenderPerBatch={5}
-                            />
-                        </View>
-                    )}
-
-                    {/* Recommended Artists (Jellyfin only) */}
-                    {recommendedArtists.length > 0 && (
-                        <View style={styles.section}>
-                            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>Artists You Like</Text>
-                            <FlatList
-                                data={recommendedArtists}
-                                renderItem={renderArtistItem}
-                                keyExtractor={(item) => item.Id}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.listContent}
-                                initialNumToRender={5}
-                                maxToRenderPerBatch={5}
-                            />
-                        </View>
-                    )}
-
-                    {/* Most Played (Local mode only) */}
-                    {dataSource === 'local' && mostPlayed.length > 0 && (
-                        <View style={styles.section}>
-                            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>Most Played</Text>
+                            {renderSectionHeader('Most Played')}
                             {isLandscape ? (
                                 <FlatList
                                     key="grid-mostplayed"
@@ -1189,13 +1545,13 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                    {/* Recently Played (Local mode only) */}
-                    {dataSource === 'local' && recentlyPlayed.length > 0 && (
+                    {/* ====== 4. Favorite Songs (both sources) ====== */}
+                    {favoriteItems.length > 0 && (
                         <View style={styles.section}>
-                            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>Recently Played</Text>
+                            {renderSectionHeader('Unstoppable Favorites')}
                             <FlatList
-                                key={isLandscape ? 'grid-recent' : 'list-recent'}
-                                data={recentlyPlayed}
+                                key={isLandscape ? 'grid-favorites' : 'list-favorites'}
+                                data={favoriteItems}
                                 renderItem={renderItem}
                                 keyExtractor={(item) => item.Id}
                                 horizontal={!isLandscape}
@@ -1209,10 +1565,32 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                    {/* Quick Picks (Songs) */}
+
+
+                    {/* ====== 6. Artists You Like ====== */}
+                    {recommendedArtists.length > 0 && (
+                        <View style={styles.section}>
+                            {renderSectionHeader('Artists You Like')}
+                            <FlatList
+                                data={recommendedArtists}
+                                renderItem={renderArtistItem}
+                                keyExtractor={(item) => item.Id}
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.listContent}
+                                initialNumToRender={5}
+                                maxToRenderPerBatch={5}
+                            />
+                        </View>
+                    )}
+
+                    {/* ====== 7. Genre Chips ====== */}
+                    {renderGenreChips()}
+
+                    {/* ====== 8. Quick Picks (Songs) ====== */}
                     {recommendations.length > 0 && (
                         <View style={styles.section}>
-                            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>Quick Picks</Text>
+                            {renderSectionHeader('Quick Picks')}
                             {isLandscape ? (
                                 <FlatList
                                     key="grid-quickpicks"
@@ -1236,12 +1614,10 @@ export default function HomeScreen() {
                         </View>
                     )}
 
-                    {/* Fresh Arrivals / Recently Added */}
+                    {/* ====== 9. Fresh Arrivals / Recently Added ====== */}
                     {latestMusic.length > 0 && (
                         <View style={styles.section}>
-                            <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={styles.sectionTitle}>
-                                {dataSource === 'local' ? 'Recently Added' : 'Fresh Arrivals'}
-                            </Text>
+                            {renderSectionHeader(dataSource === 'local' ? 'Recently Added' : 'Fresh Arrivals')}
                             <FlatList
                                 key={isLandscape ? 'grid-latest' : 'list-latest'}
                                 data={latestMusic}

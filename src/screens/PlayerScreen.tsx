@@ -41,7 +41,7 @@ interface PlayerScreenProps {
 
 export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Select specific fields to avoid re-rendering on positionMillis updates
-    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queue, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer, isQueueVisible, setQueueVisible } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
         togglePlayPause: state.togglePlayPause,
@@ -51,14 +51,23 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
         toggleRepeat: state.toggleRepeat,
         shuffleMode: state.shuffleMode,
         repeatMode: state.repeatMode,
-        queue: state.queue,
+        queueLength: state.queue.length,
         playTrack: state.playTrack,
         sleepTimerTarget: state.sleepTimerTarget,
-        setSleepTimer: state.setSleepTimer
+        setSleepTimer: state.setSleepTimer,
+        isQueueVisible: state.isQueueVisible,
+        setQueueVisible: state.setQueueVisible
     })));
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
-    const { backgroundType, themeColor, showTechnicalDetails, audioQuality, playbackRate, setPlaybackRate } = useSettingsStore();
+    const { backgroundType, themeColor, showTechnicalDetails, audioQuality, playbackRate, setPlaybackRate } = useSettingsStore(useShallow(s => ({
+        backgroundType: s.backgroundType,
+        themeColor: s.themeColor,
+        showTechnicalDetails: s.showTechnicalDetails,
+        audioQuality: s.audioQuality,
+        playbackRate: s.playbackRate,
+        setPlaybackRate: s.setPlaybackRate,
+    })));
     const isAppActive = useIsAppActive();
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
@@ -105,7 +114,8 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                     previousTrackRef.current.track,
                     source,
                     playDuration,
-                    completedPlay
+                    completedPlay,
+                    previousTrackRef.current.track.playlistId
                 ).catch(console.error);
             }
         }
@@ -172,17 +182,29 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Helper to lighten a color - use imported utility
     const lightenColor = lightenHexColor;
 
+    // Preserve last known valid colors to prevent flashing to gray while extracting
+    const fallbackBgRef = useRef<string>('#1a1a1a');
+    const fallbackAccentRef = useRef<string>(safeThemeColor);
+
     // Calculate dynamic colors from extracted colors
     const dynamicColors = useMemo(() => {
-        if (!extractedColors || backgroundType !== 'blurhash') return null;
+        if (!extractedColors || backgroundType !== 'blurhash') {
+            return {
+                backgroundColor: fallbackBgRef.current,
+                gradientColors: [fallbackBgRef.current, '#000000'] as [string, string],
+                textColor: '#FFFFFF',
+                secondaryTextColor: 'rgba(255,255,255,0.7)',
+                iconColor: '#FFFFFF',
+                activeColor: fallbackAccentRef.current,
+            };
+        }
 
         let bgColor: string;
         let accentColor: string | undefined;
 
         if (extractedColors.platform === 'android') {
-            bgColor = extractedColors.dominant || '#1a1a1a';
+            bgColor = extractedColors.dominant || fallbackBgRef.current;
 
-            // Try to find a vibrant color
             const candidates = [
                 extractedColors.vibrant,
                 extractedColors.lightVibrant,
@@ -190,22 +212,20 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                 extractedColors.lightMuted
             ];
 
-            // Find first valid color
             let rawAccent = candidates.find(c => c);
 
             if (rawAccent) {
-                // If it's dark, lighten it significantly so it pops against the dark background
                 if (isColorDark(rawAccent)) {
-                    accentColor = lightenColor(rawAccent, 0.4); // Lighten by 40%
+                    accentColor = lightenColor(rawAccent, 0.4);
                 } else {
                     accentColor = rawAccent;
                 }
             } else {
-                accentColor = safeThemeColor;
+                accentColor = fallbackAccentRef.current;
             }
 
         } else if (extractedColors.platform === 'ios') {
-            bgColor = extractedColors.background || '#1a1a1a';
+            bgColor = extractedColors.background || fallbackBgRef.current;
             const candidates = [
                 extractedColors.primary,
                 extractedColors.secondary,
@@ -220,16 +240,19 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                     accentColor = rawAccent;
                 }
             } else {
-                accentColor = safeThemeColor;
+                accentColor = fallbackAccentRef.current;
             }
         } else {
-            bgColor = '#1a1a1a';
-            accentColor = safeThemeColor;
+            bgColor = fallbackBgRef.current;
+            accentColor = fallbackAccentRef.current;
         }
 
-        // Ensure we have valid colors
-        if (!bgColor || bgColor === 'undefined') bgColor = '#1a1a1a';
-        if (!accentColor || accentColor === 'undefined') accentColor = safeThemeColor;
+        if (!bgColor || bgColor === 'undefined') bgColor = fallbackBgRef.current;
+        if (!accentColor || accentColor === 'undefined') accentColor = fallbackAccentRef.current;
+
+        // Save successful colors for next smooth transition
+        fallbackBgRef.current = bgColor;
+        fallbackAccentRef.current = accentColor;
 
         return {
             backgroundColor: bgColor,
@@ -360,7 +383,6 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
     // Local state
     const [isBuffering, setIsBuffering] = useState(false);
-    const [isQueueVisible, setIsQueueVisible] = useState(false);
     const [isLyricsVisible, setIsLyricsVisible] = useState(false);
     const [isSleepTimerVisible, setIsSleepTimerVisible] = useState(false);
     const [artworkError, setArtworkError] = useState(false);
@@ -628,7 +650,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
             if (success) {
                 // If we deleted the current track, we should play next or stop
-                if (queue.length > 1) {
+                if (queueLength > 1) {
                     playNext();
                 } else {
                     // Queue empty/single item deleted
@@ -908,7 +930,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                                     iconColor={isQueueVisible ? playerColors.activeColor : playerColors.secondaryTextColor}
                                     size={22}
                                     onPress={() => {
-                                        setIsQueueVisible(!isQueueVisible);
+                                        setQueueVisible(!isQueueVisible);
                                         if (!isQueueVisible) setIsLyricsVisible(false);
                                     }}
                                 />
@@ -1091,7 +1113,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                                     size={24}
                                     onPress={() => {
                                         setIsLyricsVisible(!isLyricsVisible);
-                                        if (!isLyricsVisible) setIsQueueVisible(false);
+                                        if (!isLyricsVisible) setQueueVisible(false);
                                     }}
                                 />
 
@@ -1144,7 +1166,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                                     iconColor={isQueueVisible ? playerColors.activeColor : playerColors.secondaryTextColor}
                                     size={24}
                                     onPress={() => {
-                                        setIsQueueVisible(!isQueueVisible);
+                                        setQueueVisible(!isQueueVisible);
                                         if (!isQueueVisible) setIsLyricsVisible(false);
                                     }}
                                 />
@@ -1371,7 +1393,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
             {/* Queue Bottom Sheet */}
             <QueueBottomSheet
                 visible={isQueueVisible}
-                onClose={() => setIsQueueVisible(false)}
+                onClose={() => setQueueVisible(false)}
                 activeColor={playerColors.activeColor}
                 backgroundColor="#000000"
             />

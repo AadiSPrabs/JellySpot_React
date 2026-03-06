@@ -170,7 +170,13 @@ export default function ActionSheet({
                         {
                             backgroundColor: sheetBgColor,
                             height: computedHeight,
-                            transform: [{ translateY: Animated.add(translateY, keyboardOffset) }],
+                            transform: [{
+                                translateY: Animated.add(translateY, keyboardOffset).interpolate({
+                                    inputRange: [-SCREEN_HEIGHT, 0, SCREEN_HEIGHT],
+                                    outputRange: [Math.min(0, -(SCREEN_HEIGHT - computedHeight)), 0, SCREEN_HEIGHT],
+                                    extrapolate: 'clamp'
+                                })
+                            }],
                             paddingBottom: insets.bottom || 24, // Add safe area padding to bottom
                         },
                         style

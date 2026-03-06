@@ -11,7 +11,6 @@ import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { DatabaseService } from '../services/DatabaseService';
-import { ShuffleFab } from '../components/ShuffleFab';
 import { Loader } from '../components/Loader';
 import { Skeleton, ListItemSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -522,47 +521,33 @@ export default function LibraryScreen() {
                         )}
                     </TouchableOpacity>
                     <Text variant={isLandscape ? "titleMedium" : "headlineSmall"} style={styles.headerTitle}>Your Library</Text>
-                    {activeFilter === 'playlists' ? (
+                    {activeFilter === 'playlists' && (
                         <IconButton icon="plus" onPress={() => setIsDialogVisible(true)} style={{ margin: 0 }} />
-                    ) : (
-                        <ShuffleFab
-                            size={40}
-                            style={{ marginRight: 0 }}
-                            onPress={async () => {
-                                // Logic for shuffle
-                            }}
-                        />
                     )}
                 </View>
             )}
 
-            <View style={styles.filterContainer}>
-                <Chip
-                    onPress={() => handleFilterChange('artists')}
-                    style={styles.chip}
-                    mode={activeFilter === 'artists' ? 'flat' : 'outlined'}
-                    selected={activeFilter === 'artists'}
-                >
-                    Artists
-                </Chip>
-                <Chip
-                    onPress={() => handleFilterChange('albums')}
-                    style={styles.chip}
-                    mode={activeFilter === 'albums' ? 'flat' : 'outlined'}
-                    selected={activeFilter === 'albums'}
-                >
-                    Albums
-                </Chip>
-                {activeFilter !== 'playlists' && (
-                    <Chip
-                        onPress={() => handleFilterChange('playlists')}
-                        style={styles.chip}
-                        mode="outlined"
-                        icon="close"
+            <View style={styles.tabBar}>
+                {(['playlists', 'artists', 'albums'] as FilterType[]).map((filter) => (
+                    <TouchableOpacity
+                        key={filter}
+                        onPress={() => handleFilterChange(filter)}
+                        style={styles.tabItem}
                     >
-                        Clear
-                    </Chip>
-                )}
+                        <Text
+                            variant="labelLarge"
+                            style={[
+                                styles.tabText,
+                                activeFilter === filter && { color: theme.colors.primary, fontWeight: 'bold' }
+                            ]}
+                        >
+                            {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                        </Text>
+                        {activeFilter === filter && (
+                            <View style={[styles.activeIndicator, { backgroundColor: theme.colors.primary }]} />
+                        )}
+                    </TouchableOpacity>
+                ))}
             </View>
 
             {isLoading && !isRefreshing ? (
@@ -592,10 +577,10 @@ export default function LibraryScreen() {
                         refreshControl={
                             <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />
                         }
-                        removeClippedSubviews={true}
-                        initialNumToRender={10}
-                        maxToRenderPerBatch={10}
-                        windowSize={5}
+                        removeClippedSubviews={false}
+                        initialNumToRender={20}
+                        maxToRenderPerBatch={15}
+                        windowSize={21}
                         ListEmptyComponent={
                             <EmptyState
                                 icon="music-note-off"
@@ -616,7 +601,7 @@ export default function LibraryScreen() {
                         value={newPlaylistName}
                         onChangeText={setNewPlaylistName}
                         mode="outlined"
-                        autoFocus
+                        autoFocus={isDialogVisible}
                     />
                     <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
                         <Button mode="text" onPress={() => setIsDialogVisible(false)}>Cancel</Button>
@@ -672,12 +657,28 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         textAlignVertical: 'center', // Android only, useful for potential font padding issues
     },
-    filterContainer: {
+    tabBar: {
         flexDirection: 'row',
         marginBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
-    chip: {
+    tabItem: {
+        paddingVertical: 12,
+        paddingHorizontal: 12,
         marginRight: 8,
+        alignItems: 'center',
+    },
+    tabText: {
+        color: 'rgba(255, 255, 255, 0.6)',
+        fontSize: 16,
+    },
+    activeIndicator: {
+        position: 'absolute',
+        bottom: 0,
+        height: 3,
+        width: '100%',
+        borderRadius: 2,
     },
     listContent: {
         paddingBottom: 140,

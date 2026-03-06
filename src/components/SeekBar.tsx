@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, LayoutChangeEvent, PanResponder } from 'react-native';
+import { View, StyleSheet, LayoutChangeEvent, PanResponder, Animated } from 'react-native';
 import { useTheme } from 'react-native-paper';
 
 interface SeekBarProps {
@@ -23,7 +23,20 @@ export const SeekBar: React.FC<SeekBarProps> = ({
 
     const [width, setWidth] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
-    const [dragProgress, setDragProgress] = useState(0);
+
+    // Smooth animation value for the progress bar
+    const animatedProgress = React.useRef(new Animated.Value(0)).current;
+
+    // React to external progress updates and interpolate smoothly
+    React.useEffect(() => {
+        if (!isDragging) {
+            Animated.timing(animatedProgress, {
+                toValue: progress,
+                duration: 250, // Matches most player poll intervals smoothly
+                useNativeDriver: false, // Cannot use native driver for width/left layout properties
+            }).start();
+        }
+    }, [progress, isDragging]);
 
     const onLayout = (e: LayoutChangeEvent) => {
         setWidth(e.nativeEvent.layout.width);
@@ -46,13 +59,13 @@ export const SeekBar: React.FC<SeekBarProps> = ({
             setIsDragging(true);
             const locationX = evt.nativeEvent.locationX;
             const p = Math.max(0, Math.min(1, locationX / width));
-            setDragProgress(p);
+            animatedProgress.setValue(p);
             startProgressRx.current = p;
         },
         onPanResponderMove: (evt, gestureState) => {
             const deltaProgress = gestureState.dx / width;
             const newProgress = Math.max(0, Math.min(1, startProgressRx.current + deltaProgress));
-            setDragProgress(newProgress);
+            animatedProgress.setValue(newProgress);
         },
         onPanResponderRelease: (evt, gestureState) => {
             const deltaProgress = gestureState.dx / width;
@@ -67,8 +80,12 @@ export const SeekBar: React.FC<SeekBarProps> = ({
         }
     }), [width, durationMillis, onSeek]);
 
-    // Use dragProgress if dragging, otherwise prop progress
-    const displayProgress = isDragging ? dragProgress : progress;
+    // Width interpolation
+    const activeWidth = animatedProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0%', '100%'],
+        extrapolate: 'clamp'
+    });
 
     return (
         <View style={styles.container} onLayout={onLayout} {...panResponderImplemented.panHandlers}>
@@ -78,10 +95,10 @@ export const SeekBar: React.FC<SeekBarProps> = ({
                 <View style={[styles.track, { backgroundColor: inactiveColor }]} />
 
                 {/* Active Progress Track */}
-                <View style={[styles.activeTrack, { width: `${displayProgress * 100}%`, backgroundColor: activeColor }]} />
+                <Animated.View style={[styles.activeTrack, { width: activeWidth, backgroundColor: activeColor }]} />
 
                 {/* Thumb */}
-                <View style={[styles.thumb, { left: `${displayProgress * 100}%`, backgroundColor: activeColor }]} />
+                <Animated.View style={[styles.thumb, { left: activeWidth, backgroundColor: activeColor }]} />
             </View>
         </View>
     );

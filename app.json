@@ -59,10 +59,7 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "ndkVersion": "26.1.10909125",
-            "splits": {
-              "abi": true
-            }
+            "ndkVersion": "26.1.10909125"
           }
         }
       ]

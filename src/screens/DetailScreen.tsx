@@ -9,7 +9,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Text, Button, List, IconButton, useTheme, Surface, Portal, Dialog, TouchableRipple, Avatar } from 'react-native-paper';
+import { Text, Button, List, IconButton, useTheme, Surface, Portal, Dialog, TouchableRipple, Avatar, TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import { Loader } from '../components/Loader';
@@ -47,6 +47,22 @@ export default function DetailScreen() {
     const [tracksLoading, setTracksLoading] = useState(true); // New state for list loading
     const [refreshing, setRefreshing] = useState(false);
 
+    // Artist specific states
+    const [artistAlbums, setArtistAlbums] = useState<any[]>([]);
+    const [similarArtists, setSimilarArtists] = useState<any[]>([]);
+    const [isBioExpanded, setIsBioExpanded] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const filteredTracks = useMemo(() => {
+        if (!searchQuery.trim()) return tracks;
+        const q = searchQuery.toLowerCase();
+        return tracks.filter(t =>
+            t.Name?.toLowerCase().includes(q) ||
+            t.AlbumArtist?.toLowerCase().includes(q) ||
+            t.Artists?.[0]?.toLowerCase().includes(q)
+        );
+    }, [tracks, searchQuery]);
+
     const { playTrack, setQueue, currentTrack, isPlaying, addToQueueNext, addToQueueEnd } = usePlayerStore();
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
@@ -74,29 +90,33 @@ export default function DetailScreen() {
     const [selectedTracks, setSelectedTracks] = useState<Set<string>>(new Set());
     const [isSelectionMenuVisible, setIsSelectionMenuVisible] = useState(false);
 
-    const toggleTrackSelection = (trackId: string) => {
-        const newSet = new Set(selectedTracks);
-        if (newSet.has(trackId)) {
-            newSet.delete(trackId);
-            if (newSet.size === 0) {
-                setIsSelectionMode(false);
+    const toggleTrackSelection = React.useCallback((trackId: string) => {
+        setSelectedTracks(prevSet => {
+            const newSet = new Set(prevSet);
+            if (newSet.has(trackId)) {
+                newSet.delete(trackId);
+                if (newSet.size === 0) {
+                    setIsSelectionMode(false);
+                }
+            } else {
+                newSet.add(trackId);
             }
-        } else {
-            newSet.add(trackId);
-        }
-        setSelectedTracks(newSet);
-    };
+            return newSet;
+        });
+    }, []);
 
-    const handleLongPress = (track: any) => {
+    const handleLongPress = React.useCallback((track: any) => {
         if (!isSelectionMode) {
             setIsSelectionMode(true);
-            const newSet = new Set<string>();
-            newSet.add(track.Id);
-            setSelectedTracks(newSet);
+            setSelectedTracks(prevSet => {
+                const newSet = new Set(prevSet);
+                newSet.add(track.Id);
+                return newSet;
+            });
         } else {
             toggleTrackSelection(track.Id);
         }
-    };
+    }, [isSelectionMode, toggleTrackSelection]);
 
     const exitSelectionMode = () => {
         setIsSelectionMode(false);
@@ -170,22 +190,37 @@ export default function DetailScreen() {
         setIsSelectionMenuVisible(false);
         const tracksToDownload = tracks.filter(t => selectedTracks.has(t.Id));
 
-        const groupName = item?.Type === 'Playlist' || item?.Type === 'MusicAlbum' ? item.Name : 'Selection';
-        const groupId = `batch-${Date.now()}`;
+        const executeSelectedDownload = async () => {
+            const groupName = item?.Type === 'Playlist' || item?.Type === 'MusicAlbum' ? item.Name : 'Selection';
+            const groupId = `batch-${Date.now()}`;
 
-        for (const track of tracksToDownload) {
-            await downloadService.queueTrack({
-                id: track.Id,
-                name: track.Name,
-                artist: track.AlbumArtist || track.Artists?.[0] || 'Unknown',
-                album: track.Album || item?.Name,
-                imageUrl: jellyfinApi.getImageUrl(track.Id),
-                durationMillis: track.RunTimeTicks ? track.RunTimeTicks / 10000 : undefined,
-                groupId,
-                groupName
-            });
+            for (const track of tracksToDownload) {
+                await downloadService.queueTrack({
+                    id: track.Id,
+                    name: track.Name,
+                    artist: track.AlbumArtist || track.Artists?.[0] || 'Unknown',
+                    album: track.Album || item?.Name,
+                    imageUrl: jellyfinApi.getImageUrl(track.Id),
+                    durationMillis: track.RunTimeTicks ? track.RunTimeTicks / 10000 : undefined,
+                    groupId,
+                    groupName
+                });
+            }
+            exitSelectionMode();
+        };
+
+        if (tracksToDownload.length >= 20) {
+            Alert.alert(
+                "Large Download",
+                `You are about to download ${tracksToDownload.length} selected songs. This may consume significant data and take a while to complete.\n\nAre you sure you want to proceed?`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Download", onPress: executeSelectedDownload }
+                ]
+            );
+        } else {
+            executeSelectedDownload();
         }
-        exitSelectionMode();
     };
 
     const handleAddSelectedToPlaylist = () => {
@@ -400,13 +435,37 @@ export default function DetailScreen() {
                         Filters: 'IsFavorite',
                     });
                 } else if (type === 'MusicArtist') {
+                    // Fetch top tracks
                     itemsData = await jellyfinApi.getItems({
                         ArtistIds: itemId,
                         IncludeItemTypes: 'Audio',
                         Recursive: true,
-                        SortBy: 'SortName',
-                        Limit: 100
+                        SortBy: 'PlayCount',
+                        SortOrder: 'Descending',
+                        Limit: 10
                     });
+
+                    // Fetch albums
+                    try {
+                        const albumsRes = await jellyfinApi.getItems({
+                            ArtistIds: itemId,
+                            IncludeItemTypes: 'MusicAlbum',
+                            Recursive: true,
+                            SortBy: 'ProductionYear,SortName',
+                            SortOrder: 'Descending'
+                        });
+                        setArtistAlbums(albumsRes.Items || []);
+                    } catch (e) {
+                        console.warn("Failed to fetch artist albums", e);
+                    }
+
+                    // Fetch similar artists
+                    try {
+                        const similarRes = await jellyfinApi.getSimilarItems(itemId);
+                        setSimilarArtists(similarRes.Items || []);
+                    } catch (e) {
+                        console.warn("Failed to fetch similar artists", e);
+                    }
                 } else if (type === 'Playlist') {
                     itemsData = await jellyfinApi.getPlaylistItems(itemId);
                 } else {
@@ -695,30 +754,30 @@ export default function DetailScreen() {
         }
     };
 
+    const handleTrackPress = async (track: any) => {
+        // Find index in current tracks
+        const index = tracks.findIndex((t: any) => (t.Id || t.id) === (track.Id || track.id));
+        if (index === -1) return;
+
+        // DEEP OPTIMIZATION: Use setRawQueue with store-level mapping
+        const mappedTracks = usePlayerStore.getState().setRawQueue(tracks, dataSource, itemId, type || '');
+
+        // Provide the EXACT ID of the song I want to play to avoid shuffle misalignment
+        const trackIdToPlay = mappedTracks[index].id;
+        const currentMappedQueue = usePlayerStore.getState().queue;
+        const targetTrack = currentMappedQueue.find(t => t.id === trackIdToPlay);
+
+        if (targetTrack) {
+            await usePlayerStore.getState().playTrack(targetTrack);
+        }
+    };
+
     const handlePlayAll = async () => {
         if (tracks.length === 0) return;
-        const isLocal = dataSource === 'local';
 
-        const queue = tracks.map(t => ({
-            id: t.Id,
-            name: t.Name,
-            artist: t.AlbumArtist || t.Artists?.[0] || 'Unknown',
-            album: t.Album || 'Unknown',
-            imageUrl: t.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : ''),
-            imageBlurHash: t.ImageBlurHashes?.Primary ? Object.values(t.ImageBlurHashes.Primary)[0] as string : undefined,
-            durationMillis: t.RunTimeTicks ? t.RunTimeTicks / 10000 : 0,
-            streamUrl: t.streamUrl || '',
-            artistId: t.ArtistItems?.[0]?.Id || '',
-            playlistId: item?.Type === 'Playlist' ? itemId : undefined,
-            playlistItemId: t.PlaylistItemId,
-            // Technical details - use direct properties for local, MediaSources for Jellyfin
-            bitrate: isLocal ? t.bitrate : t.MediaSources?.[0]?.Bitrate,
-            codec: isLocal ? t.codec : (t.MediaSources?.[0]?.Codec || t.MediaSources?.[0]?.MediaStreams?.find((s: any) => s.Type === 'Audio')?.Codec),
-            lyrics: isLocal ? t.lyrics : undefined,
-        }));
-
-        setQueue(queue);
-        await playTrack(queue[0]);
+        // DEEP OPTIMIZATION: Map in store directly
+        const mappedTracks = usePlayerStore.getState().setRawQueue(tracks, dataSource, itemId, type || '');
+        await usePlayerStore.getState().playTrack(mappedTracks[0]);
     };
 
     // Batch download all tracks
@@ -726,47 +785,52 @@ export default function DetailScreen() {
         if (tracks.length === 0 || dataSource === 'local') return;
         setIsDownloadConfirmVisible(false);
 
-        const groupName = item?.Type === 'Playlist' || item?.Type === 'MusicAlbum' ? item.Name : 'Batch Download';
-        const groupId = `batch-${Date.now()}`;
+        const executeBatchDownload = async () => {
+            const groupName = item?.Type === 'Playlist' || item?.Type === 'MusicAlbum' ? item.Name : 'Batch Download';
+            const groupId = `batch-${Date.now()}`;
 
-        for (const track of tracks) {
-            await downloadService.queueTrack({
-                id: track.Id,
-                name: track.Name,
-                artist: track.AlbumArtist || track.Artists?.[0] || 'Unknown',
-                album: track.Album || item?.Name,
-                imageUrl: jellyfinApi.getImageUrl(track.Id),
-                durationMillis: track.RunTimeTicks ? track.RunTimeTicks / 10000 : undefined,
-                groupId,
-                groupName
-            });
+            for (const track of tracks) {
+                await downloadService.queueTrack({
+                    id: track.Id,
+                    name: track.Name,
+                    artist: track.AlbumArtist || track.Artists?.[0] || 'Unknown',
+                    album: track.Album || item?.Name,
+                    imageUrl: jellyfinApi.getImageUrl(track.Id),
+                    durationMillis: track.RunTimeTicks ? track.RunTimeTicks / 10000 : undefined,
+                    groupId,
+                    groupName
+                });
+            }
+        };
+
+        if (tracks.length >= 20) {
+            Alert.alert(
+                "Large Download",
+                `You are about to download ${tracks.length} songs. This may consume significant data and take a while to complete.\n\nAre you sure you want to proceed?`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Download", onPress: executeBatchDownload }
+                ]
+            );
+        } else {
+            executeBatchDownload();
         }
     };
 
-    const handleTrackPress = React.useCallback(async (track: any, index: number) => {
-        const isLocal = dataSource === 'local';
-        const queue = tracks.map(t => ({
-            id: t.Id,
-            name: t.Name,
-            artist: t.AlbumArtist || t.Artists?.[0] || 'Unknown',
-            album: t.Album || 'Unknown',
-            imageUrl: t.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : ''),
-            imageBlurHash: t.ImageBlurHashes?.Primary ? Object.values(t.ImageBlurHashes.Primary)[0] as string : undefined,
-            durationMillis: t.RunTimeTicks ? t.RunTimeTicks / 10000 : 0,
-            streamUrl: t.streamUrl || '',
-            artistId: t.ArtistItems?.[0]?.Id || '',
-            isFavorite: t.UserData?.IsFavorite,
-            playlistId: item?.Type === 'Playlist' ? itemId : undefined,
-            playlistItemId: t.PlaylistItemId,
-            // Technical details - use direct properties for local, MediaSources for Jellyfin
-            bitrate: isLocal ? t.bitrate : t.MediaSources?.[0]?.Bitrate,
-            codec: isLocal ? t.codec : (t.MediaSources?.[0]?.Codec || t.MediaSources?.[0]?.MediaStreams?.find((s: any) => s.Type === 'Audio')?.Codec),
-            lyrics: isLocal ? t.lyrics : undefined,
-        }));
+    const handleShufflePlay = async () => {
+        if (tracks.length === 0) return;
 
-        setQueue(queue);
-        await playTrack(queue[index]);
-    }, [tracks, setQueue, playTrack, item, itemId, dataSource]);
+        // Map tracks in store, then shuffle via store (single-pass, no double work)
+        const mappedTracks = usePlayerStore.getState().setRawQueue(tracks, dataSource, itemId, type || '');
+        // Enable shuffle mode in the store (this shuffles the already-mapped queue)
+        const store = usePlayerStore.getState();
+        if (!store.shuffleMode) {
+            store.toggleShuffle();
+        }
+        // Play the first track in the now-shuffled queue
+        const shuffledQueue = usePlayerStore.getState().queue;
+        await usePlayerStore.getState().playTrack(shuffledQueue[0]);
+    };
 
     const handleOpenDialog = React.useCallback((trackId: string, trackEntryId?: string) => {
         openTrackMenu(trackId, trackEntryId);
@@ -784,7 +848,7 @@ export default function DetailScreen() {
                 index={index}
                 isCurrent={currentTrack?.id === trackItem.Id}
                 isPlaying={isPlaying}
-                onPress={() => isSelectionMode ? toggleTrackSelection(trackItem.Id) : handleTrackPress(trackItem, index)}
+                onPress={() => isSelectionMode ? toggleTrackSelection(trackItem.Id) : handleTrackPress(trackItem)}
                 onLongPress={() => handleLongPress(trackItem)}
                 onMenuPress={() => handleOpenDialog(trackItem.Id, item?.Type === 'Playlist' ? trackItem.PlaylistItemId : undefined)}
                 isSelectionMode={isSelectionMode}
@@ -796,7 +860,7 @@ export default function DetailScreen() {
                 getImageUrl={(t) => t.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : undefined)}
             />
         );
-    }, [handleTrackPress, handleOpenDialog, item, currentTrack, isPlaying, isSelectionMode, selectedTracks, dataSource, isDraggable]);
+    }, [handleTrackPress, handleOpenDialog, item, currentTrack, isPlaying, isSelectionMode, selectedTracks, dataSource, isDraggable, toggleTrackSelection, handleLongPress]);
 
     const headerImage = useMemo(() => {
         if (!item) return null;
@@ -814,7 +878,151 @@ export default function DetailScreen() {
         return <Loader />;
     }
 
+    const renderArtistHeader = () => {
+        const backdropUrl = dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(item.Id, 'Backdrop') : headerImage;
+        return (
+            <View style={{ marginBottom: 24 }}>
+                {backdropUrl && (
+                    <View style={{ width: '100%', height: 300, position: 'absolute', top: 0 }}>
+                        <Image source={{ uri: backdropUrl }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                        <LinearGradient colors={['transparent', theme.colors.background]} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 180 }} />
+                    </View>
+                )}
+
+                <View style={[styles.header, { paddingTop: backdropUrl ? 200 : 20, marginBottom: 16 }]}>
+                    <Text variant="displaySmall" style={[styles.title, { fontWeight: '900' }]}>{item.Name}</Text>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+                        {tracks.length} Top Tracks
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24 }}>
+                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0, marginRight: 16 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
+                        <ShuffleFab size={48} onPress={handleShufflePlay} />
+                    </View>
+                </View>
+
+                {item.Overview && (
+                    <Pressable style={{ paddingHorizontal: 20, marginBottom: 24 }} onPress={() => setIsBioExpanded(!isBioExpanded)}>
+                        <Text variant="labelLarge" style={{ color: theme.colors.primary, marginBottom: 8 }}>ABOUT</Text>
+                        <Text variant="bodyMedium" numberOfLines={isBioExpanded ? undefined : 3} style={{ color: theme.colors.onSurfaceVariant, lineHeight: 20 }}>
+                            {item.Overview}
+                        </Text>
+                    </Pressable>
+                )}
+
+                {artistAlbums.length > 0 && (
+                    <View style={{ marginBottom: 24 }}>
+                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Albums & EPs</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
+                            {artistAlbums.map((album) => (
+                                <Pressable key={album.Id} style={{ width: 140 }} onPress={() => (navigation as any).navigate('Detail', { itemId: album.Id, type: 'MusicAlbum' })}>
+                                    <Image source={{ uri: jellyfinApi.getImageUrl(album.Id) }} style={{ width: 140, height: 140, borderRadius: 8, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
+                                    <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: 'bold' }}>{album.Name}</Text>
+                                    <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{album.ProductionYear || 'Album'}</Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {similarArtists.length > 0 && (
+                    <View style={{ marginBottom: 24 }}>
+                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Similar Artists</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
+                            {similarArtists.map((artist) => (
+                                <Pressable key={artist.Id} style={{ width: 100, alignItems: 'center' }} onPress={() => (navigation as any).push('Detail', { itemId: artist.Id, type: 'MusicArtist' })}>
+                                    <Image source={{ uri: jellyfinApi.getImageUrl(artist.Id) }} style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
+                                    <Text variant="bodySmall" numberOfLines={2} style={{ textAlign: 'center' }}>{artist.Name}</Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 8, fontWeight: 'bold' }}>Top Tracks</Text>
+            </View>
+        );
+    };
+
+    const renderPlaylistHeader = () => {
+        const uniqueArts = Array.from(new Set(tracks.map(t => dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : t.ImageUrl).filter(Boolean)));
+        const collageArts = uniqueArts.slice(0, 4);
+
+        return (
+            <View style={styles.header}>
+                {!headerImage ? (
+                    collageArts.length >= 4 ? (
+                        <Surface style={[styles.artwork, { borderRadius: 12, overflow: 'hidden' }]} elevation={4}>
+                            <View style={{ width: 200, height: 200, flexDirection: 'row', flexWrap: 'wrap' }}>
+                                {collageArts.map((uri, i) => (
+                                    <Image key={i} source={{ uri }} style={{ width: 100, height: 100 }} />
+                                ))}
+                            </View>
+                        </Surface>
+                    ) : (
+                        <Surface style={[styles.artwork, { borderRadius: 12, elevation: 4, backgroundColor: theme.colors.surfaceVariant }]} elevation={4}>
+                            <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                                <Avatar.Icon size={80} icon={item.Id === 'liked-songs' ? 'heart' : 'playlist-music'} color={theme.colors.onSurfaceVariant} style={{ backgroundColor: 'transparent' }} />
+                            </View>
+                        </Surface>
+                    )
+                ) : (
+                    <Surface style={styles.artwork} elevation={4}>
+                        <Image source={{ uri: headerImage }} style={{ width: 200, height: 200, borderRadius: 12 }} />
+                    </Surface>
+                )}
+                <Text variant="headlineMedium" style={styles.title}>{item.Name}</Text>
+
+                {item.Overview && (
+                    <Text variant="bodyMedium" numberOfLines={3} style={{ color: theme.colors.onSurfaceVariant, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }}>
+                        {item.Overview}
+                    </Text>
+                )}
+
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 12 }}>
+                    <Surface style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.colors.surfaceVariant }}>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>Playlist</Text>
+                    </Surface>
+                    <Surface style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.colors.surfaceVariant }}>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>{tracks.length} songs</Text>
+                    </Surface>
+                    <Surface style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.colors.surfaceVariant }}>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>{formatDuration(tracks.reduce((acc, t) => acc + (t.RunTimeTicks || 0), 0))}</Text>
+                    </Surface>
+                </View>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, paddingHorizontal: 20, width: '100%', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0, marginRight: 16 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
+                        <ShuffleFab size={48} onPress={handleShufflePlay} />
+                    </View>
+                    {dataSource !== 'local' && tracks.length > 0 && (
+                        <IconButton icon="download" size={28} style={{ backgroundColor: theme.colors.surfaceVariant }} onPress={() => setIsDownloadConfirmVisible(true)} />
+                    )}
+                </View>
+
+                <View style={{ paddingHorizontal: 20, marginTop: 24, width: '100%', marginBottom: 8 }}>
+                    <TextInput
+                        mode="outlined"
+                        placeholder="Find in playlist"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        left={<TextInput.Icon icon="magnify" />}
+                        style={{ backgroundColor: theme.colors.surface, height: 40 }}
+                        dense
+                    />
+                </View>
+            </View>
+        );
+    };
+
     const renderHeader = () => {
+        if (item.Type === 'MusicArtist') {
+            return renderArtistHeader();
+        }
+        if (item.Type === 'Playlist') {
+            return renderPlaylistHeader();
+        }
         return (
             <View style={styles.header}>
                 {!headerImage ? (
@@ -891,44 +1099,50 @@ export default function DetailScreen() {
         );
     };
 
+    const isArtist = item?.Type === 'MusicArtist';
+
     return (
         <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-            <View style={[styles.appBar, isSelectionMode && { backgroundColor: theme.colors.surface, elevation: 4 }]}>
-                {isSelectionMode ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'space-between' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <IconButton icon="close" onPress={exitSelectionMode} />
-                            <Text variant="titleMedium" style={{ marginLeft: 8 }}>
-                                {selectedTracks.size} selected
-                            </Text>
+            {!isArtist && (
+                <View style={[styles.appBar, isSelectionMode && { backgroundColor: theme.colors.surface, elevation: 4 }]}>
+                    {isSelectionMode ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'space-between' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <IconButton icon="close" onPress={exitSelectionMode} />
+                                <Text variant="titleMedium" style={{ marginLeft: 8 }}>
+                                    {selectedTracks.size} selected
+                                </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row' }}>
+                                <IconButton icon="download" onPress={handleDownloadSelected} />
+                                <IconButton icon="playlist-plus" onPress={handleAddSelectedToPlaylist} />
+                                {dataSource === 'local' && (
+                                    <IconButton icon="delete" onPress={handleDeleteSelected} />
+                                )}
+                            </View>
                         </View>
-                        <View style={{ flexDirection: 'row' }}>
-                            <IconButton icon="download" onPress={handleDownloadSelected} />
-                            <IconButton icon="playlist-plus" onPress={handleAddSelectedToPlaylist} />
-                            {dataSource === 'local' && (
-                                <IconButton icon="delete" onPress={handleDeleteSelected} />
-                            )}
-                        </View>
-                    </View>
-                ) : (
-                    <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
-                )}
-            </View>
+                    ) : (
+                        <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
+                    )}
+                </View>
+            )}
 
             <DraggableFlatList
-                data={tracks}
-                extraData={tracks} // Force re-render when tracks are enriched with artwork
+                data={filteredTracks}
+                extraData={[filteredTracks, isSelectionMode, selectedTracks]} // CRITICAL: Force re-render when selection state changes
                 renderItem={renderItem}
-                keyExtractor={(item, index) => `${item.Id}-${index}`} // Composite key as there might be duplicates in playlists
+                // Don't use index in keys unless absolutely necessary, as it destroys components on reorder
+                keyExtractor={(item, index) => item.queueItemId || item.PlaylistItemId || `${item.Id}-${index}`}
                 ListHeaderComponent={renderHeader()}
                 contentContainerStyle={[styles.listContent, { paddingBottom: 200 }]}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
                 getItemLayout={(data, index) => (
                     { length: 72, offset: 72 * index, index }
                 )}
-                initialNumToRender={10}
-                maxToRenderPerBatch={10}
-                windowSize={5}
+                initialNumToRender={8}
+                maxToRenderPerBatch={8}
+                windowSize={11}
+                removeClippedSubviews={true} // Free memory for offscreen items (CRITICAL for large playlists)
                 ListEmptyComponent={tracksLoading ? (
                     <View style={{ paddingTop: 16 }}>
                         {Array.from({ length: 10 }).map((_, i) => <ListItemSkeleton key={i} />)}

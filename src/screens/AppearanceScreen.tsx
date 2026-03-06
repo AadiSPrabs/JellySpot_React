@@ -119,6 +119,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         paddingHorizontal: 16,
+        paddingVertical: 16,
         gap: 16,
     },
     colorSwatch: {

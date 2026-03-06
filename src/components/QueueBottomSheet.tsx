@@ -1,11 +1,20 @@
-import React, { useRef, useEffect } from 'react';
-import { View, StyleSheet, Animated, Dimensions, TouchableOpacity, PanResponder, Text as RNText } from 'react-native';
+import React, { useRef, useEffect, useCallback } from 'react';
+import { View, StyleSheet, Dimensions, TouchableOpacity, Text as RNText, Platform, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import { Text, useTheme } from 'react-native-paper';
 import { usePlayerStore } from '../store/playerStore';
 import { useShallow } from 'zustand/react/shallow';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    withSpring,
+    withTiming,
+    runOnJS,
+    interpolate,
+    Extrapolate
+} from 'react-native-reanimated';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
@@ -18,7 +27,7 @@ interface QueueBottomSheetProps {
     backgroundColor?: string;
 }
 
-// Ultra-lightweight item component for maximum performance
+// Optimized QueueItem
 const QueueItem = React.memo(({
     item,
     drag,
@@ -49,57 +58,30 @@ const QueueItem = React.memo(({
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             drag();
         }}
-        delayLongPress={150}
-        activeOpacity={0.6}
-        accessibilityRole="button"
-        accessibilityLabel={`Play ${item.name} by ${item.artist}${isCurrent ? ', currently playing' : ''}. Double tap and hold to reorder.`}
+        delayLongPress={200} // Slightly more for accidental drag prevention
+        activeOpacity={0.7}
     >
-        {/* Drag handle */}
         <View style={styles.dragHandleContainer}>
-            <Icon
-                name="drag-horizontal-variant"
-                size={22}
-                color={theme.colors.onSurfaceVariant}
-            />
+            <Icon name="drag" size={24} color={theme.colors.onSurfaceVariant} />
         </View>
 
-        {/* Track image */}
-        <Image
-            source={{ uri: item.imageUrl }}
-            style={styles.queueImage}
-        />
+        <Image source={{ uri: item.imageUrl }} style={styles.queueImage} />
 
-        {/* Track info */}
         <View style={styles.trackInfo}>
-            <Text
-                style={[
-                    styles.trackName,
-                    { color: isCurrent ? themeActiveColor : theme.colors.onSurface }
-                ]}
-                numberOfLines={1}
-            >
+            <Text style={[styles.trackName, { color: isCurrent ? themeActiveColor : theme.colors.onSurface }]} numberOfLines={1}>
                 {item.name}
             </Text>
-            <Text
-                style={[styles.trackArtist, { color: theme.colors.onSurfaceVariant }]}
-                numberOfLines={1}
-            >
+            <Text style={[styles.trackArtist, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
                 {item.artist}
             </Text>
         </View>
 
-        {/* Simple playing indicator - just a colored dot, no animation */}
-        {isCurrent && (
-            <View style={[styles.playingDot, { backgroundColor: themeActiveColor }]} />
-        )}
+        {isCurrent && <View style={[styles.playingDot, { backgroundColor: themeActiveColor }]} />}
 
-        {/* Delete button */}
         <TouchableOpacity
             style={styles.deleteButton}
             onPress={() => onRemove(item.queueItemId || item.id)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityRole="button"
-            accessibilityLabel={`Remove ${item.name} from queue`}
         >
             <Icon name="close" size={20} color={theme.colors.onSurfaceVariant} />
         </TouchableOpacity>
@@ -107,7 +89,8 @@ const QueueItem = React.memo(({
 ), (prev, next) => (
     (prev.item.queueItemId === next.item.queueItemId || prev.item.id === next.item.id) &&
     prev.isActive === next.isActive &&
-    prev.isCurrent === next.isCurrent
+    prev.isCurrent === next.isCurrent &&
+    prev.themeActiveColor === next.themeActiveColor
 ));
 
 export default function QueueBottomSheet({
@@ -117,14 +100,16 @@ export default function QueueBottomSheet({
     backgroundColor = '#1a1a1a'
 }: QueueBottomSheetProps) {
     const theme = useTheme();
-    const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-    const isClosingRef = useRef(false);
     const listRef = useRef<any>(null);
+    const hasScrolledRef = useRef(false);
 
-    const { queue, currentTrack, isPlaying, playTrack, reorderQueue, removeFromQueue, clearQueue } = usePlayerStore(useShallow(state => ({
+    // Reanimated values for native thread movement
+    const translateY = useSharedValue(SCREEN_HEIGHT);
+    const contextY = useSharedValue(0);
+
+    const { queue, currentTrack, playTrack, reorderQueue, removeFromQueue, clearQueue } = usePlayerStore(useShallow(state => ({
         queue: state.queue,
         currentTrack: state.currentTrack,
-        isPlaying: state.isPlaying,
         playTrack: state.playTrack,
         reorderQueue: state.reorderQueue,
         removeFromQueue: state.removeFromQueue,
@@ -133,279 +118,334 @@ export default function QueueBottomSheet({
 
     const themeActiveColor = activeColor || theme.colors.primary;
 
-    // Animate in/out
+    const [isAnimationComplete, setIsAnimationComplete] = React.useState(false);
+    const [listReady, setListReady] = React.useState(false);
+
+    // Visibility control
     useEffect(() => {
         if (visible) {
-            isClosingRef.current = false;
-            Animated.spring(translateY, {
-                toValue: 0,
-                useNativeDriver: true,
-                tension: 65,
-                friction: 11,
-            }).start();
+            translateY.value = withTiming(0, { duration: 300 }, () => {
+                runOnJS(setIsAnimationComplete)(true);
+            });
+            hasScrolledRef.current = false; // Allow one scroll when opened
+        } else {
+            setIsAnimationComplete(false); // Unmount heavy list before animating down
+            setListReady(false); // Reset ready state
+            translateY.value = withTiming(SCREEN_HEIGHT, { duration: 300 });
+        }
+    }, [visible]);
 
-            // Scroll to current track after animation starts
-            if (currentTrack && queue.length > 0) {
-                const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
-                if (currentIndex >= 0 && listRef.current) {
-                    // Small timeout to ensure list layout happens first
-                    setTimeout(() => {
+    // Handle scroll to current track silently while list is hidden
+    useEffect(() => {
+        if (isAnimationComplete && !hasScrolledRef.current && currentTrack && queue.length > 0) {
+            const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+            if (currentIndex >= 0 && listRef.current) {
+                // Give DraggableFlatList 50ms to mount its children at top
+                const mountTimer = setTimeout(() => {
+                    try {
                         listRef.current?.scrollToIndex({
                             index: currentIndex,
                             animated: false,
-                            viewPosition: 0.1 // Shows a bit of the previous track for context
+                            viewPosition: 0.1
                         });
-                    }, 50);
-                }
+                    } catch (e) {
+                        console.log('Scroll to index failed gracefully');
+                    }
+
+                    // Wait 100ms for the native UI to instantly jump, then show the list
+                    const revealTimer = setTimeout(() => {
+                        setListReady(true);
+                        hasScrolledRef.current = true;
+                    }, 100);
+                }, 50);
+
+                return () => clearTimeout(mountTimer);
+            } else {
+                setListReady(true);
             }
+        } else if (isAnimationComplete && (!currentTrack || queue.length === 0)) {
+            setListReady(true);
         }
-    }, [visible, currentTrack, queue]);
+    }, [isAnimationComplete, currentTrack?.id, queue.length]);
 
-    // Smooth close animation - animates fully then calls onClose
-    const animateClose = () => {
-        if (isClosingRef.current) return;
-        isClosingRef.current = true;
-
-        Animated.timing(translateY, {
-            toValue: SCREEN_HEIGHT,
-            duration: 300,
-            useNativeDriver: true,
-        }).start(() => {
-            onClose();
+    const animateClose = useCallback(() => {
+        translateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 }, () => {
+            runOnJS(onClose)();
         });
-    };
+    }, [onClose]);
 
-    // Pan responder for drag-to-dismiss
-    const panResponder = useRef(
-        PanResponder.create({
-            onStartShouldSetPanResponder: () => true,
-            onMoveShouldSetPanResponder: (_, gestureState) => {
-                return Math.abs(gestureState.dy) > 10;
-            },
-            onPanResponderMove: (_, gestureState) => {
-                if (gestureState.dy > 0) {
-                    translateY.setValue(gestureState.dy);
-                }
-            },
-            onPanResponderRelease: (_, gestureState) => {
-                if (gestureState.dy > 100 || gestureState.vy > 0.5) {
-                    // Continue sliding down smoothly before closing
-                    animateClose();
-                } else {
-                    Animated.spring(translateY, {
-                        toValue: 0,
-                        useNativeDriver: true,
-                        tension: 65,
-                        friction: 11,
-                    }).start();
-                }
-            },
+    // Native Gesture for the handle
+    const panGesture = Gesture.Pan()
+        .onStart(() => {
+            contextY.value = translateY.value;
         })
-    ).current;
+        .onUpdate((event) => {
+            if (event.translationY > 0) {
+                translateY.value = contextY.value + event.translationY;
+            }
+        })
+        .onEnd((event) => {
+            if (event.translationY > 100 || event.velocityY > 500) {
+                runOnJS(animateClose)();
+            } else {
+                translateY.value = withTiming(0, { duration: 250 });
+            }
+        });
 
-    // Handle drag end - reorder queue
-    const handleDragEnd = ({ from, to }: { from: number; to: number }) => {
-        if (from !== to) {
-            reorderQueue(from, to);
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: translateY.value }]
+    }));
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(translateY.value, [0, SCREEN_HEIGHT], [1, 0], Extrapolate.CLAMP)
+    }));
+
+    const listOpacityStyle = useAnimatedStyle(() => ({
+        opacity: withTiming(listReady ? 1 : 0, { duration: 200 })
+    }));
+
+    const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<any>) => (
+        <QueueItem
+            item={item}
+            drag={drag}
+            isActive={isActive}
+            isCurrent={item.id === currentTrack?.id}
+            themeActiveColor={themeActiveColor}
+            theme={theme}
+            onPress={playTrack}
+            onRemove={removeFromQueue}
+        />
+    ), [currentTrack?.id, themeActiveColor, theme, playTrack, removeFromQueue]);
+
+    const handleDragEnd = useCallback(({ from, to }: { from: number, to: number }) => {
+        if (from !== to) reorderQueue(from, to);
+    }, [reorderQueue]);
+
+    const keyExtractor = useCallback((item: any, index: number) => item.queueItemId || item.id, []);
+
+    // Only render if visible or in transition to prevent background overhead
+    const [shouldRender, setShouldRender] = React.useState(visible);
+    useEffect(() => {
+        if (visible) setShouldRender(true);
+        else {
+            const timer = setTimeout(() => setShouldRender(false), 400);
+            return () => clearTimeout(timer);
         }
-    };
+    }, [visible]);
 
-    const renderItem = React.useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<any>) => {
-        const isCurrent = item.id === currentTrack?.id;
-
-        return (
-            <QueueItem
-                item={item}
-                drag={drag}
-                isActive={isActive}
-                isCurrent={isCurrent}
-                themeActiveColor={themeActiveColor}
-                theme={theme}
-                onPress={playTrack}
-                onRemove={removeFromQueue} // QueueItem needs to pass the queueItemId now
-            />
-        );
-    }, [currentTrack?.id, themeActiveColor, theme, playTrack, removeFromQueue]);
-
-    const keyExtractor = React.useCallback((item: any, index: number) => item.queueItemId || `${item.id}-${index}`, []);
-
-    const hasRenderedRef = useRef(false);
-    if (visible && !hasRenderedRef.current) {
-        hasRenderedRef.current = true;
-    }
-
-    if (!hasRenderedRef.current) return null;
+    if (!shouldRender) return null;
 
     return (
-        <Animated.View
-            pointerEvents={visible ? 'auto' : 'none'}
-            style={[
-                styles.container,
-                {
-                    backgroundColor,
-                    transform: [{ translateY }]
-                }
-            ]}
-        >
-            {/* Drag handle bar */}
-            <View {...panResponder.panHandlers} style={styles.handleContainer}>
-                <View style={styles.handleBar} />
-                <Text variant="titleMedium" style={[styles.title, { color: theme.colors.onSurface }]}>
-                    Queue ({queue.length} tracks)
-                </Text>
-            </View>
-
-            {/* Queue list with drag-to-reorder */}
-            <View style={{ flex: 1, overflow: 'hidden' }}>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                    <DraggableFlatList
-                        ref={listRef}
-                        data={queue}
-                        renderItem={renderItem}
-                        keyExtractor={keyExtractor}
-                        onDragEnd={handleDragEnd}
-                        contentContainerStyle={styles.listContent}
-                        showsVerticalScrollIndicator={false}
-                        initialNumToRender={10}
-                        maxToRenderPerBatch={8}
-                        updateCellsBatchingPeriod={50}
-                        windowSize={11}
-                        removeClippedSubviews={true}
-                        getItemLayout={(data, index) => ({ length: 64, offset: 64 * index, index })}
-                        activationDistance={10}
-                        autoscrollThreshold={60}
-                        autoscrollSpeed={150}
-                        dragItemOverflow={false} // Overflow can cause layout thrashing
-                    />
-                </GestureHandlerRootView>
-            </View>
-
-            {/* Clear Queue Footer */}
-            <View style={styles.footer}>
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            {/* Backdrop catches taps to close */}
+            <Animated.View
+                style={[styles.backdrop, backdropStyle]}
+                pointerEvents={visible ? 'auto' : 'none'}
+            >
                 <TouchableOpacity
-                    style={[styles.clearButton, { borderColor: theme.colors.error }]}
-                    onPress={clearQueue}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear entire queue"
-                >
-                    <Icon name="playlist-remove" size={18} color={theme.colors.error} />
-                    <RNText style={[styles.clearButtonText, { color: theme.colors.error }]}>
-                        Clear Queue
-                    </RNText>
-                </TouchableOpacity>
-            </View>
-        </Animated.View>
+                    style={{ flex: 1 }}
+                    onPress={animateClose}
+                    activeOpacity={1}
+                />
+            </Animated.View>
+
+            <Animated.View
+                style={[
+                    styles.container,
+                    { backgroundColor },
+                    animatedStyle
+                ]}
+            >
+                <View style={{ flex: 1 }}>
+                    {/* Drag handle area - wider hit slop for better swipe */}
+                    <GestureDetector gesture={panGesture}>
+                        <View style={styles.handleContainer}>
+                            <View style={styles.handleBar} />
+                            <Text variant="titleMedium" style={[styles.title, { color: theme.colors.onSurface }]}>
+                                Queue ({queue.length})
+                            </Text>
+                        </View>
+                    </GestureDetector>
+
+                    <View style={styles.listWrapper}>
+                        {isAnimationComplete ? (
+                            <View style={{ flex: 1 }}>
+                                {/* Heavy list is mounted immediately but stays invisible (opacity 0) until properly scrolled */}
+                                <Animated.View style={[{ flex: 1 }, listOpacityStyle]}>
+                                    <DraggableFlatList
+                                        ref={listRef}
+                                        data={queue}
+                                        renderItem={renderItem}
+                                        keyExtractor={keyExtractor}
+                                        onDragEnd={handleDragEnd}
+                                        contentContainerStyle={styles.listContent}
+                                        showsVerticalScrollIndicator={true}
+                                        initialNumToRender={8}
+                                        maxToRenderPerBatch={8}
+                                        windowSize={11}
+                                        removeClippedSubviews={true} // CRITICAL for large queues
+                                        getItemLayout={(data, index) => ({ length: 64, offset: 64 * index, index })}
+                                        activationDistance={25}
+                                        dragItemOverflow={false}
+                                    />
+                                </Animated.View>
+
+                                {/* Keep indicator on top until silent scroll finishes */}
+                                {!listReady && (
+                                    <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
+                                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                                    </View>
+                                )}
+                            </View>
+                        ) : (
+                            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                                <ActivityIndicator size="small" color={theme.colors.primary} />
+                            </View>
+                        )}
+                    </View>
+
+                    {/* Footer Actions */}
+                    <View style={styles.footer}>
+                        <TouchableOpacity
+                            style={[styles.actionButton, { backgroundColor: theme.colors.surfaceVariant }]}
+                            onPress={animateClose}
+                        >
+                            <Icon name="chevron-down" size={24} color={theme.colors.onSurface} />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.actionButton, { backgroundColor: theme.colors.surfaceVariant, paddingHorizontal: 20 }]}
+                            onPress={() => {
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                                clearQueue();
+                            }}
+                        >
+                            <Icon name="playlist-remove" size={20} color={theme.colors.error} />
+                            <RNText style={[styles.actionButtonText, { color: theme.colors.error }]}>Clear Queue</RNText>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Animated.View>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+    },
     container: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
         top: 60,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        elevation: 10,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        elevation: 20,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        overflow: 'hidden', // Critical for autoscroll boundary detection
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 6,
+        overflow: 'hidden',
     },
     handleContainer: {
         alignItems: 'center',
         paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'transparent',
     },
     handleBar: {
-        width: 40,
+        width: 36,
         height: 4,
-        backgroundColor: 'rgba(255,255,255,0.5)',
+        backgroundColor: 'rgba(255,255,255,0.3)',
         borderRadius: 2,
-        marginBottom: 12,
+        marginBottom: 8,
     },
     title: {
-        fontWeight: 'bold',
+        fontWeight: '700',
+        letterSpacing: 0.5,
+    },
+    listWrapper: {
+        flex: 1,
     },
     listContent: {
-        padding: 16,
+        paddingHorizontal: 16,
         paddingBottom: 100,
     },
     queueItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 6,
-        paddingRight: 8,
-        borderRadius: 8,
-        marginBottom: 2,
         height: 64,
+        borderRadius: 12,
+        marginBottom: 4,
+        paddingRight: 8,
     },
     dragHandleContainer: {
-        paddingHorizontal: 6,
-        paddingVertical: 10,
+        paddingHorizontal: 12,
+        opacity: 0.5,
     },
     queueImage: {
         width: 44,
         height: 44,
-        borderRadius: 4,
-        marginRight: 10,
-        backgroundColor: '#333',
+        borderRadius: 6,
+        marginRight: 12,
+        backgroundColor: '#2a2a2a',
     },
     trackInfo: {
         flex: 1,
         justifyContent: 'center',
     },
     trackName: {
-        fontSize: 14,
-        fontWeight: '500',
+        fontSize: 15,
+        fontWeight: '600',
     },
     trackArtist: {
         fontSize: 12,
         marginTop: 2,
+        opacity: 0.7,
     },
     playingDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginHorizontal: 8,
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        marginHorizontal: 12,
     },
     deleteButton: {
-        padding: 8,
-    },
-    deleteAction: {
-        backgroundColor: '#d32f2f',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 70,
-        height: '100%',
-        borderRadius: 8,
-        marginBottom: 4,
+        padding: 10,
+        opacity: 0.6,
     },
     footer: {
         position: 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        paddingBottom: 24,
-        backgroundColor: 'transparent',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+        backgroundColor: '#1a1a1a',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.1)',
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
     },
-    clearButton: {
+    actionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 10,
+        justifyContent: 'center',
+        paddingVertical: 12,
         paddingHorizontal: 16,
-        borderRadius: 8,
-        alignSelf: 'flex-start',
-        backgroundColor: '#d32f2f',
+        borderRadius: 12,
     },
-    clearButtonText: {
-        fontSize: 14,
-        fontWeight: '500',
+    actionButtonText: {
+        fontSize: 15,
+        fontWeight: 'bold',
         marginLeft: 8,
     },
 });
