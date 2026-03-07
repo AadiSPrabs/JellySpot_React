@@ -2,26 +2,49 @@
 
 # JellySpot
 
-A music player built with React Native (Expo) for local libraries and Jellyfin servers.
+A premium, feature-rich music player built with React Native (Expo) that seamlessly bridges local music libraries and Jellyfin servers into a single, polished experience.
 
-## Features
+## ✨ Features
 
-- **Dual Mode Support:** Seamlessly switch between local device music and Jellyfin servers.
-- **Library Navigation:** Quick access to Playlists, Artists, and Albums with intuitive swipe-based tabs.
-- **Now Playing Hero:** Dedicated home screen card for current track control with skip and play/pause buttons.
-- **Dynamic Theming:** UI colors adapt to the current track's album art.
-- **Secure Auth:** Authentication tokens are stored encrypted using OS-level secure storage (SecureStore).
-- **Offline First:** Local database for library tracking and play history.
+### 🎵 Core Playback & Experience
+- **Dual Source Mode:** Effortlessly switch between your **Local Device Library** and your **Jellyfin Server**.
+- **Smart Now Playing:** A beautiful, dynamic player that extracts theme colors from album art for a cohesive visual experience.
+- **Hero Card Controls:** Quick track controls (Skip, Play/Pause) directly on the Home Screen.
+- **Premium Seek Bar:** Smooth progress interpolation and high-precision seeking.
+- **Compact Layout:** Global song item density optimized for power users.
 
-## Technical Stack
+### 📜 Lyrics & Translation
+- **Integrated Lyrics:** Support for both synced (.lrc) and plain text lyrics.
+- **Multi-Source Fetching:** Automatically pulls lyrics from Jellyfin and [LRCLIB](https://lrclib.net/).
+- **Real-time Translation:** Translate or romanize lyrics on the fly using Google Translate integration.
+- **Offline Cache:** Lyrics are cached in the local database for instant access.
 
-- **Framework:** React Native (Expo)
-- **State Management:** Zustand
-- **Database:** SQLite with Drizzle ORM
-- **Audio:** React Native Track Player
-- **UI:** React Native Paper
+### 💾 Offline & Downloads
+- **Managed Download System:** Download tracks from Jellyfin for offline listening.
+- **Background Downloads:** Integrated with Expo Notifications for real-time progress tracking even when the app is in the background.
+- **Storage Management:** Custom download directory support and storage stats monitoring.
+- **Local Database:** Powered by SQLite and Drizzle ORM for lightning-fast library indexing and play history.
 
-## Getting Started
+### 🔍 Discovery & Navigation
+- **Global Search:** Find tracks, artists, and albums across both local and remote sources simultaneously.
+- **Modern Library Layout:** A snappy top-bar navigation system for Playlists, Artists, and Albums with optimized swipe gestures.
+- **Quick Access Grid:** Personalized home screen with recently played items and active playlists.
+
+### 🛡️ Security & Privacy
+- **Secure Auth Storage:** Authentication tokens are stored in the OS Keychain/Keystore using **Expo SecureStore**, ensuring your credentials aren't accessible in plaintext.
+- **Privacy Focused:** Your data stays on your device and your server.
+
+## 🛠️ Technical Stack
+
+- **Framework:** [React Native](https://reactnative.dev/) (Expo SDK 54)
+- **State Management:** [Zustand](https://github.com/pmndrs/zustand)
+- **Database:** SQLite with [Drizzle ORM](https://orm.drizzle.team/)
+- **Audio Engine:** [React Native Track Player](https://react-native-track-player.js.org/)
+- **UI Components:** [React Native Paper](https://reactnativepaper.com/)
+- **Networking:** Axios with standardized auth interceptors
+- **Typography:** Google Fonts (Inter, Roboto)
+
+## 📦 Getting Started
 
 1. **Clone the repository:**
    ```bash
@@ -34,11 +57,11 @@ A music player built with React Native (Expo) for local libraries and Jellyfin s
    npm install
    ```
 
-3. **Start the app:**
+3. **Start the development server:**
    ```bash
    npx expo start
    ```
 
-## License
+## 📄 License
 
-MIT License
+This project is licensed under the **MIT License**.
