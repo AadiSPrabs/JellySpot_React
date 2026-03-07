@@ -70,7 +70,6 @@ A premium, feature-rich music player built with React Native (Expo) that seamles
   <img src="screenshots/now_playing.jpeg" width="180" />
   <img src="screenshots/lyrics_view.jpeg" width="180" />
   <img src="screenshots/library_screen.jpeg" width="180" />
-  <img src="screenshots/downloads_screen.jpeg" width="180" />
 </div>
 
 ## 📄 License
