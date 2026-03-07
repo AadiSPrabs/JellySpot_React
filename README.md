@@ -1,33 +1,32 @@
 # JellySpot
 
-A premium, feature-rich music player built with React Native, designed for a seamless experience with both local libraries and Jellyfin servers.
+A premium, feature-rich music player built with React Native (Expo), designed for a seamless experience with local music libraries and Jellyfin servers.
 
 ## ✨ Features
 
 - **Dual Mode Support:** Switch effortlessly between your Local Device Library and your Jellyfin Server.
+- **Remote Control (Spotify Connect-like):** Control playback on other active Jellyspot/Jellyfin sessions from within the app.
 - **Modern Library Navigation:** Intuitive top-bar navigation to quickly switch between **Playlists**, **Artists**, and **Albums**.
 - **Quick Access Grid:** A dynamic home screen grid that prioritizes your Recently Played tracks and playlists.
-- **Premium Playback Experience:** High-performance audio service with smooth transitions, progress interpolation, and a beautiful mini-player.
-- **Lyrics Integration:** View synced and un-synced lyrics directly within the player.
-- **Smart Queue & Shuffle:** Optimized queue management with a fast Fisher-Yates shuffle that respects user-defined limits.
-- **Offline First:** Robust local database (SQLite) for tracking play history, favorites, and cached metadata.
+- **Premium Playback Experience:** High-performance audio service with smooth transitions, progress interpolation, and a beautiful mini-player with home screen hero controls.
 - **Beautiful UI:** Modern design with dynamic theme colors extracted from album art.
+- **Security First:** Encrypted authentication token storage using OS Keychain/Keystore (SecureStore).
 
 ## 🚀 Recent Improvements
 
-- **Fixed Database Tracking:** Resolved issues with playlist tracking by implementing proper SQLite migrations.
-- **Performance Optimization:** Drastic reduction in re-renders and JS thread blocking during heavy queue operations.
-- **UI Refinement:** Transitioned and polished the Library screen with a new top-bar tab system.
-- **Jellyfin Integration:** Enhanced metadata fetching and name resolution for Jellyfin playlists.
+- **Remote Control Feature:** Full support for WebSocket-based remote sessions and client management.
+- **Queue Screen Refactor:** Reimagined the queue as a dedicated, high-performance screen with smooth reordering.
+- **Security Hardening:** Migrated sensitive auth data to `expo-secure-store` and conducted a comprehensive security audit.
+- **UI Performance:** Optimized navigation transitions (200ms) and drastically reduced JS thread blocking.
 
 ## 🛠️ Technical Stack
 
-- **Framework:** React Native (Expo)
+- **Framework:** React Native (Expo SDK 54)
 - **State Management:** Zustand
 - **Database:** SQLite (Expo SQLite) with Drizzle ORM
 - **Audio:** React Native Track Player
 - **UI Components:** React Native Paper & Vector Icons
-- **Styling:** Vanilla CSS-in-JS for maximum performance
+- **Storage:** AsyncStorage & Expo SecureStore
 
 ## 📦 Getting Started
 
@@ -49,4 +48,4 @@ A premium, feature-rich music player built with React Native, designed for a sea
 
 ## 📄 License
 
-This project is for educational and personal use.
+This project is licensed under the **MIT License**.
