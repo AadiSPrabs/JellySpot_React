@@ -1,4 +1,4 @@
-<div align="left"><img src="assets/AppIcons/playstore.png" width="500" height="500"/></div>
+<div align="left"><img src="assets/AppIcons/playstore.png" width="250" height="250"/></div>
 
 # JellySpot
 
