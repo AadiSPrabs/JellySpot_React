@@ -1,6 +1,6 @@
 <div align="center"><img src="assets/AppIcons/playstore.png" width="250" height="250"/></div>
 
-# JellySpot
+# <img src="assets/AppIcons/playstore.png" width="48" height="48" /> JellySpot
 
 A premium, feature-rich music player built with React Native (Expo) that seamlessly bridges local music libraries and Jellyfin servers into a single, polished experience.
 
@@ -61,6 +61,16 @@ A premium, feature-rich music player built with React Native (Expo) that seamles
    ```bash
    npx expo start
    ```
+
+## 📱 Screenshots
+
+<div align="center">
+  <img src="screenshots/home_screen.jpeg" width="180" />
+  <img src="screenshots/now_playing.jpeg" width="180" />
+  <img src="screenshots/lyrics_view.jpeg" width="180" />
+  <img src="screenshots/library_screen.jpeg" width="180" />
+  <img src="screenshots/downloads_screen.jpeg" width="180" />
+</div>
 
 ## 📄 License
 
