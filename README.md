@@ -1,34 +1,25 @@
 # JellySpot
 
-A premium, feature-rich music player built with React Native (Expo), designed for a seamless experience with local music libraries and Jellyfin servers.
+A music player built with React Native (Expo) for local libraries and Jellyfin servers.
 
-## ✨ Features
+## Features
 
-- **Dual Mode Support:** Switch effortlessly between your Local Device Library and your Jellyfin Server.
-- **Remote Control (Spotify Connect-like):** Control playback on other active Jellyspot/Jellyfin sessions from within the app.
-- **Modern Library Navigation:** Intuitive top-bar navigation to quickly switch between **Playlists**, **Artists**, and **Albums**.
-- **Quick Access Grid:** A dynamic home screen grid that prioritizes your Recently Played tracks and playlists.
-- **Premium Playback Experience:** High-performance audio service with smooth transitions, progress interpolation, and a beautiful mini-player with home screen hero controls.
-- **Beautiful UI:** Modern design with dynamic theme colors extracted from album art.
-- **Security First:** Encrypted authentication token storage using OS Keychain/Keystore (SecureStore).
+- **Dual Mode Support:** Seamlessly switch between local device music and Jellyfin servers.
+- **Library Navigation:** Quick access to Playlists, Artists, and Albums with intuitive swipe-based tabs.
+- **Now Playing Hero:** Dedicated home screen card for current track control with skip and play/pause buttons.
+- **Dynamic Theming:** UI colors adapt to the current track's album art.
+- **Secure Auth:** Authentication tokens are stored encrypted using OS-level secure storage (SecureStore).
+- **Offline First:** Local database for library tracking and play history.
 
-## 🚀 Recent Improvements
+## Technical Stack
 
-- **Remote Control Feature:** Full support for WebSocket-based remote sessions and client management.
-- **Queue Screen Refactor:** Reimagined the queue as a dedicated, high-performance screen with smooth reordering.
-- **Security Hardening:** Migrated sensitive auth data to `expo-secure-store` and conducted a comprehensive security audit.
-- **UI Performance:** Optimized navigation transitions (200ms) and drastically reduced JS thread blocking.
-
-## 🛠️ Technical Stack
-
-- **Framework:** React Native (Expo SDK 54)
+- **Framework:** React Native (Expo)
 - **State Management:** Zustand
-- **Database:** SQLite (Expo SQLite) with Drizzle ORM
+- **Database:** SQLite with Drizzle ORM
 - **Audio:** React Native Track Player
-- **UI Components:** React Native Paper & Vector Icons
-- **Storage:** AsyncStorage & Expo SecureStore
+- **UI:** React Native Paper
 
-## 📦 Getting Started
+## Getting Started
 
 1. **Clone the repository:**
    ```bash
@@ -41,11 +32,11 @@ A premium, feature-rich music player built with React Native (Expo), designed fo
    npm install
    ```
 
-3. **Start the development server:**
+3. **Start the app:**
    ```bash
    npx expo start
    ```
 
-## 📄 License
+## License
 
-This project is licensed under the **MIT License**.
+MIT License
