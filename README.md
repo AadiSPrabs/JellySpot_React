@@ -44,6 +44,7 @@ A premium, feature-rich music player built with React Native (Expo) that seamles
 - **UI Components:** [React Native Paper](https://reactnativepaper.com/)
 - **Networking:** Axios with standardized auth interceptors
 - **Typography:** Google Fonts (Inter, Roboto)
+(This shi- is vibe-coded lol)
 
 ## 📦 Getting Started
 
