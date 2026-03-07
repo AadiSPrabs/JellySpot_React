@@ -1,3 +1,5 @@
+<div align="center"><img src="assets/AppIcons/playstore.png" width="100"/></div>
+
 # JellySpot
 
 A music player built with React Native (Expo) for local libraries and Jellyfin servers.
