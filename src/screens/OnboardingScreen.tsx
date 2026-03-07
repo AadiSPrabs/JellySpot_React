@@ -105,7 +105,7 @@ export default function OnboardingScreen() {
 
     const canContinue = jellyfinSelected || localSelected;
 
-    const handleNextStep = () => {
+    const handleNextStep = (forceAuthenticated = false) => {
         if (step === 0 && canContinue) {
             if (jellyfinSelected) {
                 setStep(1); // Go to Jellyfin Login Step
@@ -114,7 +114,7 @@ export default function OnboardingScreen() {
                 setStep(3); // Skip to Finish step (Local only)
                 scrollViewRef.current?.scrollTo({ x: width * 3, animated: true });
             }
-        } else if (step === 1 && isAuthenticated) {
+        } else if (step === 1 && (isAuthenticated || forceAuthenticated)) {
             setStep(2); // Go to Library Selection Step
             fetchLibraries();
             scrollViewRef.current?.scrollTo({ x: width * 2, animated: true });
@@ -190,7 +190,7 @@ export default function OnboardingScreen() {
 
             login(userData);
             setIsAuthenticated(true);
-            handleNextStep();
+            handleNextStep(true); // Advance immediately
         } catch (err: any) {
             console.error('Login failed:', err);
             setError(err.message || 'Login failed. Check credentials.');
@@ -511,16 +511,19 @@ export default function OnboardingScreen() {
                         Back
                     </Button>
                 )}
-                <Button
-                    mode="contained"
-                    onPress={step === 3 ? handleFinish : handleNextStep}
-                    disabled={(step === 0 && !canContinue) || (step === 1 && !isAuthenticated)}
-                    style={styles.continueButton}
-                    contentStyle={styles.continueButtonContent}
-                    labelStyle={{ fontSize: 16, fontWeight: 'bold' }}
-                >
-                    {step === 3 ? 'Let\'s Go!' : 'Continue'}
-                </Button>
+                {/* Hide redundant Continue button during Jellyfin Login step (step 1) */}
+                {step !== 1 && (
+                    <Button
+                        mode="contained"
+                        onPress={step === 3 ? handleFinish : handleNextStep}
+                        disabled={(step === 0 && !canContinue) || (step === 1 && !isAuthenticated)}
+                        style={styles.continueButton}
+                        contentStyle={styles.continueButtonContent}
+                        labelStyle={{ fontSize: 16, fontWeight: 'bold' }}
+                    >
+                        {step === 3 ? 'Let\'s Go!' : 'Continue'}
+                    </Button>
+                )}
             </View>
         </SafeAreaView>
     );

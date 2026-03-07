@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, FlatList, Vibration, TouchableOpacity, useWindowDimensions, RefreshControl } from 'react-native';
+import { View, StyleSheet, FlatList, Vibration, TouchableOpacity, useWindowDimensions, RefreshControl, NativeScrollEvent, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, List, Avatar, Chip, useTheme, IconButton, Portal, Dialog, TextInput, Button, ActivityIndicator, TouchableRipple } from 'react-native-paper';
+import { Text, Avatar, useTheme, IconButton, TextInput, Button, TouchableRipple } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -11,293 +11,31 @@ import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { DatabaseService } from '../services/DatabaseService';
-import { Loader } from '../components/Loader';
 import { Skeleton, ListItemSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
 import ActionSheet from '../components/ActionSheet';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    useAnimatedScrollHandler,
+    interpolate,
+    runOnJS
+} from 'react-native-reanimated';
 
 type FilterType = 'playlists' | 'artists' | 'albums';
 
-export default function LibraryScreen() {
-    const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
-    const theme = useTheme();
-    const user = useAuthStore((state) => state.user);
-    const { dataSource } = useSettingsStore();
-    const localLibrary = useLocalLibraryStore();
-    const { width, height } = useWindowDimensions();
-    const isLandscape = width > height;
+interface PageProps {
+    isLandscape: boolean;
+    pageWidth: number;
+    numColumns: number;
+    dataSource: 'local' | 'jellyfin';
+    navigation: any;
+    theme: any;
+}
 
-    const [playlists, setPlaylists] = React.useState<any[]>([]);
-    const [artists, setArtists] = React.useState<any[]>([]);
-    const [albums, setAlbums] = React.useState<any[]>([]);
-    const [activeFilter, setActiveFilter] = React.useState<FilterType>('playlists');
-    const [isLoading, setIsLoading] = React.useState(false);
-    const [isRefreshing, setIsRefreshing] = React.useState(false);
-    const [isDialogVisible, setIsDialogVisible] = React.useState(false);
-    const [newPlaylistName, setNewPlaylistName] = React.useState('');
-    const [isCreating, setIsCreating] = React.useState(false);
-
-    // Deletion State
-    const [deleteDialogVisible, setDeleteDialogVisible] = React.useState(false);
-    const [playlistsToDelete, setPlaylistsToDelete] = React.useState<any[]>([]);
-    const [isDeleting, setIsDeleting] = React.useState(false);
-
-    // Multi-select state
-    const [isSelectionMode, setIsSelectionMode] = React.useState(false);
-    const [selectedItems, setSelectedItems] = React.useState<Set<string>>(new Set());
-
-    const toggleSelection = (id: string) => {
-        // Prevent selecting special items
-        if (id === 'all-songs' || id === 'liked-songs') return;
-
-        const newSet = new Set(selectedItems);
-        if (newSet.has(id)) {
-            newSet.delete(id);
-            if (newSet.size === 0) setIsSelectionMode(false);
-        } else {
-            newSet.add(id);
-        }
-        setSelectedItems(newSet);
-    };
-
-    const handleLongPressItem = (item: any) => {
-        const id = item.Id || item.id;
-
-        // Prevent selecting special items
-        if (id === 'all-songs' || id === 'liked-songs') return;
-
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        if (!isSelectionMode) {
-            setIsSelectionMode(true);
-            const newSet = new Set<string>();
-            newSet.add(id);
-            setSelectedItems(newSet);
-        } else {
-            toggleSelection(id);
-        }
-    };
-
-    const exitSelectionMode = () => {
-        setIsSelectionMode(false);
-        setSelectedItems(new Set());
-    };
-
-    const handleDeleteSelected = async () => {
-        // Only support deleting playlists for now
-        // Safe implementation: Filter selected items from current list
-        const itemsToDelete = getDisplayItems().filter(i => selectedItems.has(i.Id || i.id));
-
-        // Filter for Playlists (safest) and exclude liked-songs
-        const filteredPlaylists = itemsToDelete.filter(i => i.Type === 'Playlist' && i.id !== 'liked-songs' && i.Id !== 'liked-songs');
-
-        if (filteredPlaylists.length === 0) {
-            // Show message that only playlists can be deleted
-            exitSelectionMode();
-            return;
-        }
-
-        // Set all playlists to delete
-        setPlaylistsToDelete(filteredPlaylists);
-        setDeleteDialogVisible(true);
-    };
-
-
-    const fetchPlaylists = async () => {
-        if (dataSource === 'local') {
-            // Transform local playlists to match expected format
-            const localPlaylists = localLibrary.playlists.map(p => ({
-                Id: p.id,
-                Name: p.name,
-                Type: 'Playlist',
-                ChildCount: p.trackIds?.length || 0, // Defensive check for undefined
-                isLocal: true,
-            }));
-            setPlaylists(localPlaylists);
-        } else {
-            try {
-                const data = await jellyfinApi.getPlaylists();
-                if (data && data.Items) {
-                    setPlaylists(data.Items);
-                }
-            } catch (error) {
-                console.error('Failed to fetch playlists:', error);
-            }
-        }
-    };
-
-    const fetchArtists = async () => {
-        setIsLoading(true);
-        try {
-            if (dataSource === 'local') {
-                // Fetch grouped artists directly from SQLite (Much faster)
-                const localArtists = await DatabaseService.getAllArtists();
-                const formattedArtists = localArtists.map(a => ({
-                    Id: a.artistId,
-                    Name: a.artist,
-                    Type: 'MusicArtist',
-                    ImageUrl: a.imageUrl,
-                }));
-                // DB sort is likely enough, but safe to sort again or trust DB
-                setArtists(formattedArtists);
-            } else {
-                const data = await jellyfinApi.getItems({
-                    IncludeItemTypes: 'MusicArtist',
-                    Recursive: true,
-                    SortBy: 'SortName',
-                    SortOrder: 'Ascending',
-                    Fields: 'PrimaryImageAspectRatio,BasicSyncInfo',
-                });
-                if (data && data.Items) {
-                    setArtists(data.Items);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to fetch artists:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const fetchAlbums = async () => {
-        setIsLoading(true);
-        try {
-            if (dataSource === 'local') {
-                // Fetch grouped albums directly from SQLite
-                const localAlbums = await DatabaseService.getAllAlbums();
-                const formattedAlbums = localAlbums.map(a => ({
-                    Id: a.album, // Use album name as ID for local
-                    Name: a.album,
-                    AlbumArtist: a.artist,
-                    Type: 'MusicAlbum',
-                    ImageUrl: a.imageUrl,
-                }));
-                setAlbums(formattedAlbums);
-            } else {
-                const data = await jellyfinApi.getItems({
-                    IncludeItemTypes: 'MusicAlbum',
-                    Recursive: true,
-                    SortBy: 'SortName',
-                    SortOrder: 'Ascending',
-                    Fields: 'PrimaryImageAspectRatio,BasicSyncInfo',
-                });
-                if (data && data.Items) {
-                    setAlbums(data.Items);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to fetch albums:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const onRefresh = React.useCallback(() => {
-        setIsRefreshing(true);
-        if (activeFilter === 'artists') {
-            fetchArtists();
-        } else if (activeFilter === 'albums') {
-            fetchAlbums();
-        } else {
-            fetchPlaylists().then(() => setIsRefreshing(false));
-        }
-    }, [activeFilter, dataSource]);
-
-    React.useEffect(() => {
-        fetchPlaylists();
-    }, [dataSource, localLibrary.playlists]);
-
-    // Clear and refetch when dataSource or user changes
-    React.useEffect(() => {
-        // Clear all data when source or user changes
-        setPlaylists([]);
-        setArtists([]);
-        setAlbums([]);
-
-        // Refetch the currently active filter
-        if (activeFilter === 'playlists') {
-            fetchPlaylists();
-        } else if (activeFilter === 'artists') {
-            fetchArtists();
-        } else if (activeFilter === 'albums') {
-            fetchAlbums();
-        }
-    }, [dataSource, user?.id]);
-
-    // Re-fetch artists/albums when tracks are enriched (new metadata/artwork)
-    React.useEffect(() => {
-        if (dataSource === 'local') {
-            if (activeFilter === 'artists') {
-                fetchArtists();
-            } else if (activeFilter === 'albums') {
-                fetchAlbums();
-            }
-        }
-    }, [localLibrary.tracks, localLibrary.selectedFolderPaths]); // Re-fetch when tracks or folder selection changes
-
-    const handleFilterChange = (filter: FilterType) => {
-        setActiveFilter(filter);
-        if (filter === 'artists' && artists.length === 0) {
-            fetchArtists();
-        } else if (filter === 'albums' && albums.length === 0) {
-            fetchAlbums();
-        }
-    };
-
-    const handleCreatePlaylist = async () => {
-        if (!newPlaylistName.trim()) return;
-        setIsCreating(true);
-        try {
-            if (dataSource === 'local') {
-                // Create local playlist
-                localLibrary.createPlaylist(newPlaylistName);
-            } else {
-                await jellyfinApi.createPlaylist(newPlaylistName);
-            }
-            setNewPlaylistName('');
-            setIsDialogVisible(false);
-            fetchPlaylists(); // Refresh list
-        } catch (error) {
-            console.error('Failed to create playlist:', error);
-        } finally {
-            setIsCreating(false);
-        }
-    };
-
-    const initiateDeletePlaylist = (item: any) => {
-        if (item.Type === 'Playlist' && item.id !== 'liked-songs') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-            setPlaylistsToDelete([item]);
-            setDeleteDialogVisible(true);
-        }
-    };
-
-    const handleDeletePlaylist = async () => {
-        if (playlistsToDelete.length === 0) return;
-        setIsDeleting(true);
-        try {
-            // Delete all selected playlists
-            for (const playlist of playlistsToDelete) {
-                if (playlist.isLocal || dataSource === 'local') {
-                    // Delete local playlist
-                    localLibrary.deletePlaylist(playlist.Id || playlist.id);
-                } else {
-                    await jellyfinApi.deleteItem(playlist.Id || playlist.id);
-                }
-            }
-            setDeleteDialogVisible(false);
-            setPlaylistsToDelete([]);
-            exitSelectionMode(); // Exit selection mode after delete
-            fetchPlaylists();
-        } catch (error) {
-            console.error('Failed to delete playlist:', error);
-        } finally {
-            setIsDeleting(false);
-        }
-    };
-
+const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, theme, navigation }: any) => {
     const handleItemPress = (item: any) => {
         if (item.id === 'all-songs') {
             navigation.navigate('Detail', { itemId: 'all-songs', type: 'All Songs' });
@@ -310,152 +48,95 @@ export default function LibraryScreen() {
         }
     };
 
-    // Calculate number of columns for landscape grid
-    const numColumns = isLandscape ? Math.floor(width / 160) : 1;
-
-    // Grid item renderer for landscape mode
-    const renderGridItem = ({ item }: { item: any }) => {
-        let icon = 'folder';
-        if (item.id === 'all-songs') {
-            icon = 'music-box-multiple';
-        } else if (item.id === 'liked-songs') {
-            icon = 'heart';
-        } else if (item.Type === 'Playlist') {
-            icon = 'playlist-music';
-        } else if (item.Type === 'MusicArtist') {
-            icon = 'account-music';
-        } else if (item.Type === 'MusicAlbum') {
-            icon = 'album';
-        }
-
-        const hasImage = item.ImageTags?.Primary || item.ImageUrl;
+    if (isLandscape) {
+        const cardWidth = (pageWidth - 48) / numColumns - 8;
         const itemId = item.Id || item.id;
         const imageUri = item.ImageUrl || (item.ImageTags?.Primary ? jellyfinApi.getImageUrl(itemId) : null);
-        const contentWidth = isLandscape ? width - LEFT_BAR_WIDTH : width;
-        const cardWidth = (contentWidth - 48) / numColumns - 8;
-
-        const isSelected = selectedItems.has(itemId);
+        let icon = 'folder';
+        if (item.id === 'all-songs') icon = 'music-box-multiple';
+        else if (item.id === 'liked-songs') icon = 'heart';
+        else if (item.Type === 'Playlist') icon = 'playlist-music';
+        else if (item.Type === 'MusicArtist') icon = 'account-music';
+        else if (item.Type === 'MusicAlbum') icon = 'album';
 
         return (
             <TouchableRipple
-                onPress={() => isSelectionMode ? toggleSelection(itemId) : handleItemPress(item)}
-                onLongPress={() => handleLongPressItem(item)}
+                onPress={() => handleItemPress(item)}
                 rippleColor="rgba(0, 0, 0, 0.3)"
-                style={{
-                    width: cardWidth,
-                    margin: 4,
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    backgroundColor: isSelected ? theme.colors.primaryContainer : theme.colors.surfaceVariant,
-                    borderWidth: isSelected ? 2 : 0,
-                    borderColor: theme.colors.primary,
-                }}
+                style={{ width: cardWidth, margin: 4, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.colors.surfaceVariant }}
             >
                 <View style={{ alignItems: 'center', padding: 12 }}>
-                    {isSelectionMode && itemId !== 'all-songs' && itemId !== 'liked-songs' && (
-                        <View style={{ position: 'absolute', top: 4, right: 4, zIndex: 10 }}>
-                            <Icon name={isSelected ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"} size={20} color={theme.colors.primary} />
-                        </View>
-                    )}
-                    {hasImage && imageUri ? (
-                        <Avatar.Image
-                            size={cardWidth - 32}
-                            source={{ uri: imageUri }}
-                            style={{ marginBottom: 8 }}
-                        />
-                    ) : (
-                        <Avatar.Icon
-                            icon={icon}
-                            size={cardWidth - 32}
-                            style={{ backgroundColor: theme.colors.secondaryContainer, marginBottom: 8 }}
-                        />
-                    )}
-                    <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: '500', textAlign: 'center' }}>
-                        {item.Name || item.title}
-                    </Text>
+                    {imageUri ? <Avatar.Image size={cardWidth - 32} source={{ uri: imageUri }} style={{ marginBottom: 8 }} /> :
+                        <Avatar.Icon icon={icon} size={cardWidth - 32} style={{ backgroundColor: theme.colors.secondaryContainer, marginBottom: 8 }} />}
+                    <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: '500', textAlign: 'center' }}>{item.Name || item.title}</Text>
                 </View>
             </TouchableRipple>
         );
-    };
+    }
 
-    const renderItem = ({ item }: { item: any }) => {
-        // Use grid layout in landscape
-        if (isLandscape) {
-            return renderGridItem({ item });
-        }
+    let icon = 'folder';
+    let description = item.Type || item.type;
+    if (item.id === 'all-songs') icon = 'music-box-multiple';
+    else if (item.id === 'liked-songs') icon = 'heart';
+    else if (item.Type === 'Playlist') icon = 'playlist-music';
+    else if (item.Type === 'MusicArtist') { icon = 'account-music'; description = 'Artist'; }
+    else if (item.Type === 'MusicAlbum') { icon = 'album'; description = item.AlbumArtist || 'Album'; }
 
-        let icon = 'folder';
-        let description = item.Type || item.type;
+    const itemId = item.Id || item.id;
+    const imageUri = item.ImageUrl || (item.ImageTags?.Primary ? jellyfinApi.getImageUrl(itemId) : null);
 
-        if (item.id === 'all-songs') {
-            icon = 'music-box-multiple';
-        } else if (item.id === 'liked-songs') {
-            icon = 'heart';
-        } else if (item.Type === 'Playlist') {
-            icon = 'playlist-music';
-        } else if (item.Type === 'MusicArtist') {
-            icon = 'account-music';
-            description = 'Artist';
-        } else if (item.Type === 'MusicAlbum') {
-            icon = 'album';
-            description = item.AlbumArtist || 'Album';
-        }
-
-        // Check for image - Jellyfin uses ImageTags.Primary, local uses ImageUrl
-        const hasImage = item.ImageTags?.Primary || item.ImageUrl;
-        const itemId = item.Id || item.id;
-        const imageUri = item.ImageUrl || (item.ImageTags?.Primary ? jellyfinApi.getImageUrl(itemId) : null);
-        const isSelected = selectedItems.has(itemId);
-
-        return (
-            <TouchableRipple
-                onPress={() => isSelectionMode ? toggleSelection(itemId) : handleItemPress(item)}
-                onLongPress={() => handleLongPressItem(item)}
-                rippleColor="rgba(0, 0, 0, 0.3)"
-                underlayColor={theme.colors.secondaryContainer}
-                style={[
-                    styles.item,
-                    { borderRadius: 8, overflow: 'hidden' },
-                    isSelected && { backgroundColor: theme.colors.primaryContainer }
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.Name || item.title}${isSelected ? ', selected' : ''}`}
-            >
-                <View style={styles.itemRow}>
-                    {isSelectionMode && itemId !== 'all-songs' && itemId !== 'liked-songs' && (
-                        <View style={{ paddingLeft: 8 }}>
-                            <Icon name={isSelected ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"} size={24} color={theme.colors.primary} />
-                        </View>
-                    )}
-                    <View style={styles.avatarContainer}>
-                        {hasImage && imageUri ? (
-                            <Avatar.Image
-                                size={48}
-                                source={{ uri: imageUri }}
-                            />
-                        ) : (
-                            <Avatar.Icon
-                                icon={icon}
-                                size={48}
-                                style={{ backgroundColor: theme.colors.secondaryContainer }}
-                            />
-                        )}
-                    </View>
-                    <View style={styles.itemTextContainer}>
-                        <Text variant="bodyLarge" numberOfLines={1} style={{ fontWeight: '500' }}>{item.Name || item.title}</Text>
-                        <Text variant="bodyMedium" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{description}</Text>
-                    </View>
+    return (
+        <TouchableRipple
+            onPress={() => handleItemPress(item)}
+            rippleColor="rgba(0, 0, 0, 0.3)"
+            style={[styles.item, { borderRadius: 8, overflow: 'hidden' }]}
+        >
+            <View style={styles.itemRow}>
+                <View style={styles.avatarContainer}>
+                    {imageUri ? <Avatar.Image size={48} source={{ uri: imageUri }} /> :
+                        <Avatar.Icon icon={icon} size={48} style={{ backgroundColor: theme.colors.secondaryContainer }} />}
                 </View>
-            </TouchableRipple>
-        );
+                <View style={styles.itemTextContainer}>
+                    <Text variant="bodyLarge" numberOfLines={1} style={{ fontWeight: '500' }}>{item.Name || item.title}</Text>
+                    <Text variant="bodyMedium" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{description}</Text>
+                </View>
+            </View>
+        </TouchableRipple>
+    );
+});
+
+const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme }: PageProps) => {
+    const [playlists, setPlaylists] = React.useState<any[]>([]);
+    const [isRefreshing, setIsRefreshing] = React.useState(false);
+    const [isLoading, setIsLoading] = React.useState(true);
+    const localLibrary = useLocalLibraryStore();
+
+    const fetchPlaylists = async () => {
+        if (dataSource === 'local') {
+            setPlaylists(localLibrary.playlists.map(p => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackIds?.length || 0, isLocal: true })));
+        } else {
+            try {
+                const data = await jellyfinApi.getPlaylists();
+                if (data?.Items) setPlaylists(data.Items);
+            } catch (error) { console.error(error); }
+        }
     };
 
-    // Static items - adjust based on mode
+    const onRefresh = async () => {
+        setIsRefreshing(true);
+        await fetchPlaylists();
+        setIsRefreshing(false);
+    };
+
+    React.useEffect(() => {
+        fetchPlaylists().then(() => setIsLoading(false));
+    }, [dataSource, localLibrary.playlists]);
+
     const getStaticItems = () => {
         if (dataSource === 'local') {
             return [
-                { id: 'all-songs', title: 'All Songs', type: 'Library', count: localLibrary.getFilteredTracks().length },
-                { id: 'liked-songs', title: 'Liked Songs', type: 'Playlist', count: localLibrary.getFavoriteTracks().length },
+                { id: 'all-songs', title: 'All Songs', type: 'Library' },
+                { id: 'liked-songs', title: 'Liked Songs', type: 'Playlist' },
             ];
         }
         return [
@@ -464,255 +145,237 @@ export default function LibraryScreen() {
         ];
     };
 
-    // Get the data based on active filter
-    const getDisplayItems = () => {
-        switch (activeFilter) {
-            case 'artists':
-                return artists;
-            case 'albums':
-                return albums;
-            case 'playlists':
-            default:
-                return [...getStaticItems(), ...playlists];
-        }
+    if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
+
+    return (
+        <View style={{ width: pageWidth }}>
+            <FlatList
+                data={[...getStaticItems(), ...playlists]}
+                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
+                keyExtractor={(item) => (item.Id || item.id) + 'p'}
+                numColumns={isLandscape ? numColumns : 1}
+                contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
+                refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
+                ListEmptyComponent={<EmptyState icon="music-note-off" title="No Playlists found" description="Create a playlist to get started" />}
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={5}
+            />
+        </View>
+    );
+});
+
+const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme }: PageProps) => {
+    const [artists, setArtists] = React.useState<any[]>([]);
+    const [isRefreshing, setIsRefreshing] = React.useState(false);
+    const [isLoading, setIsLoading] = React.useState(true);
+
+    const fetchArtists = async () => {
+        try {
+            if (dataSource === 'local') {
+                const localArtists = await DatabaseService.getAllArtists();
+                setArtists(localArtists.map(a => ({ Id: a.artistId, Name: a.artist, Type: 'MusicArtist', ImageUrl: a.imageUrl })));
+            } else {
+                const data = await jellyfinApi.getItems({ IncludeItemTypes: 'MusicArtist', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', Fields: 'PrimaryImageAspectRatio,BasicSyncInfo' });
+                if (data?.Items) setArtists(data.Items);
+            }
+        } catch (error) { console.error(error); }
     };
 
-    const renderSkeleton = () => {
-        if (isLandscape) {
-            return (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12 }}>
-                    {Array.from({ length: 8 }).map((_, i) => (
-                        <CardSkeleton key={i} width={(width - LEFT_BAR_WIDTH - 48) / numColumns - 8} />
-                    ))}
-                </View>
-            );
-        }
-        return (
-            <View>
-                {Array.from({ length: 10 }).map((_, i) => (
-                    <ListItemSkeleton key={i} />
-                ))}
-            </View>
-        );
+    const onRefresh = async () => {
+        setIsRefreshing(true);
+        await fetchArtists();
+        setIsRefreshing(false);
     };
+
+    React.useEffect(() => {
+        fetchArtists().then(() => setIsLoading(false));
+    }, [dataSource]);
+
+    if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
+
+    return (
+        <View style={{ width: pageWidth }}>
+            <FlatList
+                data={artists}
+                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
+                keyExtractor={(item) => (item.Id || item.id) + 'ar'}
+                numColumns={isLandscape ? numColumns : 1}
+                contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
+                refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
+                ListEmptyComponent={<EmptyState icon="account-music" title="No Artists found" />}
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={5}
+            />
+        </View>
+    );
+});
+
+const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme }: PageProps) => {
+    const [albums, setAlbums] = React.useState<any[]>([]);
+    const [isRefreshing, setIsRefreshing] = React.useState(false);
+    const [isLoading, setIsLoading] = React.useState(true);
+
+    const fetchAlbums = async () => {
+        try {
+            if (dataSource === 'local') {
+                const localAlbums = await DatabaseService.getAllAlbums();
+                setAlbums(localAlbums.map(a => ({ Id: a.album, Name: a.album, AlbumArtist: a.artist, Type: 'MusicAlbum', ImageUrl: a.imageUrl })));
+            } else {
+                const data = await jellyfinApi.getItems({ IncludeItemTypes: 'MusicAlbum', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', Fields: 'PrimaryImageAspectRatio,BasicSyncInfo' });
+                if (data?.Items) setAlbums(data.Items);
+            }
+        } catch (error) { console.error(error); }
+    };
+
+    const onRefresh = async () => {
+        setIsRefreshing(true);
+        await fetchAlbums();
+        setIsRefreshing(false);
+    };
+
+    React.useEffect(() => {
+        fetchAlbums().then(() => setIsLoading(false));
+    }, [dataSource]);
+
+    if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
+
+    return (
+        <View style={{ width: pageWidth }}>
+            <FlatList
+                data={albums}
+                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
+                keyExtractor={(item) => (item.Id || item.id) + 'al'}
+                numColumns={isLandscape ? numColumns : 1}
+                contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
+                refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
+                ListEmptyComponent={<EmptyState icon="album" title="No Albums found" />}
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={5}
+            />
+        </View>
+    );
+});
+
+export default function LibraryScreen() {
+    const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
+    const theme = useTheme();
+    const user = useAuthStore((state) => state.user);
+    const { dataSource } = useSettingsStore();
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
+
+    const pageWidth = isLandscape ? width - LEFT_BAR_WIDTH : width;
+    const scrollX = useSharedValue(0);
+    const pagerRef = React.useRef<Animated.ScrollView>(null);
+    const [activeFilter, setActiveFilter] = React.useState<FilterType>('playlists');
+
+    const scrollHandler = useAnimatedScrollHandler({
+        onScroll: (event) => {
+            scrollX.value = event.contentOffset.x;
+        },
+        onMomentumEnd: (event) => {
+            const page = Math.round(event.contentOffset.x / pageWidth);
+            const filters: FilterType[] = ['playlists', 'artists', 'albums'];
+            if (activeFilter !== filters[page]) {
+                runOnJS(setActiveFilter)(filters[page]);
+            }
+        }
+    });
+
+    const handleFilterChange = (filter: FilterType) => {
+        const filters: FilterType[] = ['playlists', 'artists', 'albums'];
+        const index = filters.indexOf(filter);
+        pagerRef.current?.scrollTo({ x: index * pageWidth, animated: true });
+        setActiveFilter(filter);
+    };
+
+    const indicatorStyle = useAnimatedStyle(() => {
+        const tabWidth = (pageWidth - 32) / 3;
+        const translateX = interpolate(
+            scrollX.value,
+            [0, pageWidth, pageWidth * 2],
+            [0, tabWidth, tabWidth * 2]
+        );
+        return {
+            transform: [{ translateX }],
+            width: tabWidth - 16,
+            marginLeft: 8,
+        };
+    });
+
+    const numColumns = Math.floor(pageWidth / 160);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-            {/* Headers and chips code remains same until isLoading check */}
-            {isSelectionMode ? (
-                <View style={[styles.header, { backgroundColor: theme.colors.primaryContainer, borderRadius: 8, padding: 8, marginBottom: 8 }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <IconButton icon="close" onPress={exitSelectionMode} />
-                        <Text variant="titleMedium" style={{ marginLeft: 8 }}>{selectedItems.size} selected</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row' }}>
-                        {activeFilter === 'playlists' && (
-                            <IconButton icon="delete" onPress={handleDeleteSelected} iconColor={theme.colors.error} />
-                        )}
-                    </View>
-                </View>
-            ) : (
-                <View style={[styles.header, isLandscape && { marginBottom: 8, marginTop: 4 }]}>
-                    <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
-                        {user?.id ? (
-                            <Avatar.Image size={isLandscape ? 32 : 40} source={{ uri: jellyfinApi.getUserImageUrl(user.id) }} />
-                        ) : (
-                            <Avatar.Icon size={isLandscape ? 32 : 40} icon="account" />
-                        )}
-                    </TouchableOpacity>
-                    <Text variant={isLandscape ? "titleMedium" : "headlineSmall"} style={styles.headerTitle}>Your Library</Text>
-                    {activeFilter === 'playlists' && (
-                        <IconButton icon="plus" onPress={() => setIsDialogVisible(true)} style={{ margin: 0 }} />
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+                    {user?.id ? (
+                        <Avatar.Image size={isLandscape ? 32 : 40} source={{ uri: jellyfinApi.getUserImageUrl(user.id) }} />
+                    ) : (
+                        <Avatar.Icon size={isLandscape ? 32 : 40} icon="account" />
                     )}
-                </View>
-            )}
-
-            <View style={styles.tabBar}>
-                {(['playlists', 'artists', 'albums'] as FilterType[]).map((filter) => (
-                    <TouchableOpacity
-                        key={filter}
-                        onPress={() => handleFilterChange(filter)}
-                        style={styles.tabItem}
-                    >
-                        <Text
-                            variant="labelLarge"
-                            style={[
-                                styles.tabText,
-                                activeFilter === filter && { color: theme.colors.primary, fontWeight: 'bold' }
-                            ]}
-                        >
-                            {filter.charAt(0).toUpperCase() + filter.slice(1)}
-                        </Text>
-                        {activeFilter === filter && (
-                            <View style={[styles.activeIndicator, { backgroundColor: theme.colors.primary }]} />
-                        )}
-                    </TouchableOpacity>
-                ))}
+                </TouchableOpacity>
+                <Text variant={isLandscape ? "titleMedium" : "headlineSmall"} style={styles.headerTitle}>Your Library</Text>
+                {activeFilter === 'playlists' && (
+                    <IconButton icon="plus" onPress={() => { }} style={{ margin: 0 }} />
+                )}
             </View>
 
-            {isLoading && !isRefreshing ? (
-                renderSkeleton()
-            ) : (
-                dataSource === 'local' && !localLibrary.permissionGranted ? (
-                    <EmptyState
-                        icon="folder-lock"
-                        title="Local Library Access"
-                        description="Please grant access to your device's audio files to display your local library."
-                        actionLabel="Grant Permission"
-                        onAction={() => localLibrary.requestPermissions()}
-                    />
-                ) : (
-                    <FlatList
-                        key={isLandscape ? `grid-${numColumns}` : 'list'}
-                        data={getDisplayItems()}
-                        renderItem={renderItem}
-                        keyExtractor={(item) => item.Id || item.id}
-                        numColumns={isLandscape ? numColumns : 1}
-                        contentContainerStyle={[
-                            styles.listContent,
-                            { paddingBottom: 180 },
-                            isLandscape && { paddingHorizontal: 16 },
-                            getDisplayItems().length === 0 && { flex: 1 }
-                        ]}
-                        refreshControl={
-                            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />
-                        }
-                        removeClippedSubviews={false}
-                        initialNumToRender={20}
-                        maxToRenderPerBatch={15}
-                        windowSize={21}
-                        ListEmptyComponent={
-                            <EmptyState
-                                icon="music-note-off"
-                                title={`No ${activeFilter} found`}
-                                description={activeFilter === 'playlists' ? 'Create a playlist to get started' : 'Add some music to your library'}
-                                actionLabel={dataSource === 'local' ? 'Rescan Library' : undefined}
-                                onAction={dataSource === 'local' ? () => localLibrary.refreshLibrary() : undefined}
-                            />
-                        }
-                    />
-                )
-            )}
-
-            <ActionSheet visible={isDialogVisible} onClose={() => setIsDialogVisible(false)} title="New Playlist" heightPercentage={35}>
-                <View style={{ gap: 16 }}>
-                    <TextInput
-                        label="Playlist Name"
-                        value={newPlaylistName}
-                        onChangeText={setNewPlaylistName}
-                        mode="outlined"
-                        autoFocus={isDialogVisible}
-                    />
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setIsDialogVisible(false)}>Cancel</Button>
-                        <Button
-                            mode="contained"
-                            onPress={handleCreatePlaylist}
-                            loading={isCreating}
-                            disabled={!newPlaylistName.trim() || isCreating}
-                        >Create</Button>
-                    </View>
+            <View style={styles.tabContainer}>
+                <View style={styles.tabBar}>
+                    {(['playlists', 'artists', 'albums'] as FilterType[]).map((filter) => (
+                        <TouchableOpacity
+                            key={filter}
+                            onPress={() => handleFilterChange(filter)}
+                            style={[styles.tabItem, { width: (pageWidth - 32) / 3 }]}
+                        >
+                            <Text variant="labelLarge" style={[styles.tabText, activeFilter === filter && { color: theme.colors.primary, fontWeight: 'bold' }]}>
+                                {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                    <Animated.View style={[styles.activeIndicator, { backgroundColor: theme.colors.primary }, indicatorStyle]} />
                 </View>
-            </ActionSheet>
+            </View>
 
-            <ActionSheet visible={deleteDialogVisible} onClose={() => setDeleteDialogVisible(false)} title={`Delete ${playlistsToDelete.length > 1 ? 'Playlists' : 'Playlist'}?`} heightPercentage={35}>
-                <View style={{ gap: 16 }}>
-                    <Text variant="bodyMedium">
-                        Are you sure you want to delete {playlistsToDelete.length > 1
-                            ? `these ${playlistsToDelete.length} playlists: ${playlistsToDelete.map(p => p.Name || p.name || p.title).join(', ')}`
-                            : `"${playlistsToDelete[0]?.Name || playlistsToDelete[0]?.name || playlistsToDelete[0]?.title}"`
-                        }? This action cannot be undone.
-                    </Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
-                        <Button
-                            mode="contained"
-                            buttonColor={theme.colors.error}
-                            onPress={handleDeletePlaylist}
-                            loading={isDeleting}
-                            disabled={isDeleting}
-                        >Delete</Button>
-                    </View>
-                </View>
-            </ActionSheet>
+            <Animated.ScrollView
+                ref={pagerRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={scrollHandler}
+                scrollEventThrottle={16}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ width: pageWidth * 3 }}
+                decelerationRate="fast"
+                removeClippedSubviews={true}
+            >
+                <PlaylistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
+                <ArtistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
+                <AlbumPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
+            </Animated.ScrollView>
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        paddingHorizontal: 16,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 16,
-        marginTop: 8,
-    },
-    headerTitle: {
-        flex: 1,
-        marginLeft: 16,
-        fontWeight: 'bold',
-        textAlignVertical: 'center', // Android only, useful for potential font padding issues
-    },
-    tabBar: {
-        flexDirection: 'row',
-        marginBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    tabItem: {
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-        marginRight: 8,
-        alignItems: 'center',
-    },
-    tabText: {
-        color: 'rgba(255, 255, 255, 0.6)',
-        fontSize: 16,
-    },
-    activeIndicator: {
-        position: 'absolute',
-        bottom: 0,
-        height: 3,
-        width: '100%',
-        borderRadius: 2,
-    },
-    listContent: {
-        paddingBottom: 140,
-    },
-    item: {
-        paddingVertical: 8,
-    },
-    itemRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 8, // Add padding inside ripple
-    },
-    itemTextContainer: {
-        marginLeft: 16,
-        flex: 1,
-        justifyContent: 'center',
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    avatarContainer: {
-        width: 48,
-        height: 48,
-        marginLeft: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    emptyState: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 40,
-    },
+    container: { flex: 1 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 8, paddingHorizontal: 16 },
+    headerTitle: { flex: 1, marginLeft: 16, fontWeight: 'bold' },
+    tabContainer: { paddingHorizontal: 16 },
+    tabBar: { flexDirection: 'row', marginBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.1)', position: 'relative' },
+    tabItem: { paddingVertical: 12, alignItems: 'center' },
+    tabText: { color: 'rgba(255, 255, 255, 0.6)', fontSize: 14 },
+    activeIndicator: { position: 'absolute', bottom: -1, height: 3, borderRadius: 2 },
+    listContent: { paddingBottom: 140 },
+    item: { paddingVertical: 8 },
+    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+    itemTextContainer: { marginLeft: 16, flex: 1, justifyContent: 'center' },
+    avatarContainer: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center' },
 });

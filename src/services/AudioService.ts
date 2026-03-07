@@ -175,6 +175,26 @@ class AudioService {
         await this.setup();
         return await TrackPlayer.getRate();
     }
+
+    async setVolume(volume: number) {
+        await this.setup();
+        await TrackPlayer.setVolume(volume);
+    }
+
+    async getVolume(): Promise<number> {
+        await this.setup();
+        return await TrackPlayer.getVolume();
+    }
+
+    // Remote Volume Helper
+    triggerRemoteVolumeIndicator(level: number) {
+        const { targetSessionId, setVolumeLevel, setShowVolumeIndicator } = require('../store/remoteStore').useRemoteStore.getState();
+        if (targetSessionId) {
+            setVolumeLevel(level);
+            setShowVolumeIndicator(true);
+            // Optionally, we could send the command here, but we are intercepting in PlayerScreen for now
+        }
+    }
 }
 
 export const audioService = new AudioService();

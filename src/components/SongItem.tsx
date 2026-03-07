@@ -165,15 +165,15 @@ export const SongItem = React.memo(SongItemComponent, areEqual);
 const styles = StyleSheet.create({
     container: {
         borderRadius: 8,
-        marginHorizontal: 8,
-        marginVertical: 2,
+        marginHorizontal: 4,
+        marginVertical: 1,
         overflow: 'hidden'
     },
     contentRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 8,
-        minHeight: 72,
+        padding: 6,
+        minHeight: 64,
     },
     artworkContainer: {
         position: 'relative',

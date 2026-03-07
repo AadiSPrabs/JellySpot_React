@@ -1118,12 +1118,26 @@ export default function HomeScreen() {
                                 <Text variant="titleSmall" numberOfLines={1} style={{ fontWeight: '600' }}>{currentTrack.name}</Text>
                                 <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{currentTrack.artist}</Text>
                             </View>
-                            <IconButton
-                                icon={isPlaying ? 'pause' : 'play'}
-                                size={28}
-                                onPress={() => usePlayerStore.getState().togglePlayPause()}
-                                style={{ marginRight: 8 }}
-                            />
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 4 }}>
+                                <IconButton
+                                    icon="skip-previous"
+                                    size={22}
+                                    onPress={() => usePlayerStore.getState().playPrevious()}
+                                    style={{ margin: 0 }}
+                                />
+                                <IconButton
+                                    icon={isPlaying ? 'pause' : 'play'}
+                                    size={28}
+                                    onPress={() => usePlayerStore.getState().togglePlayPause()}
+                                    style={{ margin: 0 }}
+                                />
+                                <IconButton
+                                    icon="skip-next"
+                                    size={22}
+                                    onPress={() => usePlayerStore.getState().playNext()}
+                                    style={{ margin: 0 }}
+                                />
+                            </View>
                         </View>
                     </Surface>
                 </Pressable>
@@ -1536,7 +1550,7 @@ export default function HomeScreen() {
                             ) : (
                                 <View style={styles.listContent}>
                                     {mostPlayed.slice(0, 5).map((item) => (
-                                        <View key={item.Id} style={{ marginBottom: 8 }}>
+                                        <View key={item.Id}>
                                             {renderSongItem({ item })}
                                         </View>
                                     ))}
@@ -1605,7 +1619,7 @@ export default function HomeScreen() {
                             ) : (
                                 <View style={styles.listContent}>
                                     {recommendations.slice(0, 5).map((item) => (
-                                        <View key={item.Id} style={{ marginBottom: 8 }}>
+                                        <View key={item.Id}>
                                             {renderSongItem({ item })}
                                         </View>
                                     ))}

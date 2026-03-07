@@ -64,6 +64,9 @@ import { initializeDatabase } from './src/db/init';
 
 import { OfflineIndicator } from './src/components/OfflineIndicator';
 
+import { RemoteVolumeIndicator } from './src/components/RemoteVolumeIndicator';
+import { webSocketService } from './src/services/WebSocketService';
+
 export default function App() {
   React.useEffect(() => {
     // Initialize Database and load local library tracks
@@ -72,6 +75,8 @@ export default function App() {
 
     // Initialize player listeners
     usePlayerStore.getState().init();
+
+    // Note: webSocketService is now managed by authStore listener
   }, []);
 
   return (
@@ -80,6 +85,7 @@ export default function App() {
         <SafeAreaProvider>
           <AppContent />
           <OfflineIndicator />
+          <RemoteVolumeIndicator />
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>

@@ -9,11 +9,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { Surface, Text, useTheme } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Play, Pause, Music } from 'lucide-react-native';
+import { Play, Pause, Music, Headphones, Monitor } from 'lucide-react-native';
 import { MiniProgressBar } from './MiniProgressBar';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
 
 import { audioService } from '../services/AudioService';
+import { useRemoteStore } from '../store/remoteStore';
+import { ConnectMenu } from './ConnectMenu';
+import { Modal, Portal } from 'react-native-paper';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -286,6 +289,8 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                             <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{trackToRender.artist}</Text>
                         </Animated.View>
 
+
+
                         <TouchableOpacity
                             onPress={togglePlayPause}
                             style={[styles.playButton, { padding: 4 }]}
@@ -305,6 +310,8 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
         </GestureDetector>
     );
 }
+
+
 
 const styles = StyleSheet.create({
     container: {

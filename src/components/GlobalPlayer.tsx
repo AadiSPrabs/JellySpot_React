@@ -21,12 +21,11 @@ const MINIPLAYER_HEIGHT = 64;
 const DRAG_THRESHOLD = 100;
 
 export default function GlobalPlayer() {
-    const { currentTrack, isPlayerExpanded, setPlayerExpanded, heroCardVisible, isQueueVisible } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlayerExpanded, setPlayerExpanded, heroCardVisible } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlayerExpanded: state.isPlayerExpanded,
         setPlayerExpanded: state.setPlayerExpanded,
         heroCardVisible: state.heroCardVisible,
-        isQueueVisible: state.isQueueVisible
     })));
 
     const { width, height: SCREEN_HEIGHT } = useWindowDimensions();
@@ -122,8 +121,7 @@ export default function GlobalPlayer() {
                     translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
                 }
             }
-        })
-        .enabled(!isQueueVisible);
+        });
 
     const containerStyle = useAnimatedStyle(() => {
         return {

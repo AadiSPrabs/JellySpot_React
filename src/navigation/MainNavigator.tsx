@@ -137,7 +137,12 @@ function CustomTabBar(props: BottomTabBarProps & { isLandscape: boolean; isLocal
 function HomeStackNavigator() {
     const theme = useTheme();
     return (
-        <HomeStack.Navigator screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
+        <HomeStack.Navigator screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            animationDuration: 200,
+            contentStyle: { backgroundColor: theme.colors.background }
+        }}>
             <HomeStack.Screen name="Home" component={HomeScreen} />
             <HomeStack.Screen name="Detail" component={DetailScreen} />
             <HomeStack.Screen name="Settings" component={SettingsScreen} />
@@ -155,7 +160,12 @@ function SearchStackNavigator() {
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
     return (
-        <SearchStack.Navigator screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
+        <SearchStack.Navigator screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            animationDuration: 200,
+            contentStyle: { backgroundColor: theme.colors.background }
+        }}>
             <SearchStack.Screen name="Search" component={SearchScreen} />
             <SearchStack.Screen name="Detail" component={DetailScreen} />
             <SearchStack.Screen name="Dependencies" component={DependenciesScreen} />
@@ -167,7 +177,12 @@ function LibraryStackNavigator() {
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
     return (
-        <LibraryStack.Navigator screenOptions={{ headerShown: false, animation: 'default', contentStyle: { backgroundColor: theme.colors.background } }}>
+        <LibraryStack.Navigator screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            animationDuration: 200,
+            contentStyle: { backgroundColor: theme.colors.background }
+        }}>
             <LibraryStack.Screen name="Library" component={LibraryScreen} />
             <LibraryStack.Screen name="Detail" component={DetailScreen} />
             <LibraryStack.Screen name="Settings" component={SettingsScreen} />

@@ -21,20 +21,35 @@ const getDeviceId = async (): Promise<string> => {
         return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
     });
     cachedDeviceId = id;
-    AsyncStorage.setItem('jellyspot-device-id', id).catch(() => { });
+    try {
+        await AsyncStorage.setItem('jellyspot-device-id', id);
+    } catch { }
     return id;
 };
 
+// Internal init to be called at module scope
+let initPromise: Promise<string> | null = null;
+const ensureDeviceId = (): Promise<string> => {
+    if (initPromise) return initPromise;
+    initPromise = getDeviceId();
+    return initPromise;
+};
+
 // Synchronous getter for the device ID (uses cached value, falls back to sync init)
-const getDeviceIdSync = (): string => {
+export const getDeviceIdSync = (): string => {
     return cachedDeviceId || 'jellyspot-mobile';
 };
 
 // Initialize device ID eagerly at module load
-getDeviceId();
+ensureDeviceId();
 
-const getAuthHeader = (token?: string): string => {
-    const deviceId = getDeviceIdSync();
+// Wait for device ID to be loaded
+export const waitForDeviceId = async (): Promise<string> => {
+    return await ensureDeviceId();
+};
+
+const getAuthHeaderAsync = async (token?: string): Promise<string> => {
+    const deviceId = await waitForDeviceId();
     return `MediaBrowser Client="Jellyspot", Device="React Native", DeviceId="${deviceId}", Version="1.0.0"${token ? `, Token="${token}"` : ''}`;
 };
 
@@ -54,10 +69,15 @@ const getApiClient = () => {
 
     apiClient = axios.create({
         baseURL: serverUrl || '',
-        headers: {
-            'X-Emby-Authorization': getAuthHeader(token),
-        },
     });
+
+    apiClient.interceptors.request.use(async (config) => {
+        // Use the token from the closure when the client was requested, or fetch latest
+        const currentToken = useAuthStore.getState().user?.token || token;
+        config.headers['X-Emby-Authorization'] = await getAuthHeaderAsync(currentToken);
+        return config;
+    });
+
     lastServerUrl = serverUrl;
     lastToken = token;
 
@@ -77,12 +97,13 @@ export const jellyfinApi = {
         const { serverUrl } = useAuthStore.getState();
         if (!serverUrl) throw new Error("Server URL not set");
 
+        const authHeader = await getAuthHeaderAsync();
         const response = await axios.post(`${serverUrl}/Users/AuthenticateByName`, {
             Username: username,
             Pw: pw,
         }, {
             headers: {
-                'X-Emby-Authorization': getAuthHeader(),
+                'X-Emby-Authorization': authHeader,
             }
         });
         return response.data;
@@ -90,9 +111,10 @@ export const jellyfinApi = {
 
     getUser: async (userId: string, token: string) => {
         const { serverUrl } = useAuthStore.getState();
+        const authHeader = await getAuthHeaderAsync(token);
         const response = await axios.get(`${serverUrl}/Users/${userId}`, {
             headers: {
-                'X-Emby-Authorization': getAuthHeader(token)
+                'X-Emby-Authorization': authHeader
             },
             timeout: 5000
         });
@@ -101,9 +123,10 @@ export const jellyfinApi = {
 
     getMe: async (token: string) => {
         const { serverUrl } = useAuthStore.getState();
+        const authHeader = await getAuthHeaderAsync(token);
         const response = await axios.get(`${serverUrl}/Users/Me`, {
             headers: {
-                'X-Emby-Authorization': getAuthHeader(token)
+                'X-Emby-Authorization': authHeader
             },
             timeout: 5000
         });
@@ -479,8 +502,9 @@ export const jellyfinApi = {
         const { serverUrl } = useAuthStore.getState();
         if (!serverUrl) throw new Error("Server URL not set");
 
+        const authHeader = await getAuthHeaderAsync();
         const headers = {
-            'X-Emby-Authorization': getAuthHeader()
+            'X-Emby-Authorization': authHeader
         };
 
         const response = await axios.post(`${serverUrl}/QuickConnect/Initiate`, {}, { headers, timeout: 10000 });
@@ -491,8 +515,9 @@ export const jellyfinApi = {
         const { serverUrl } = useAuthStore.getState();
         if (!serverUrl) throw new Error("Server URL not set");
 
+        const authHeader = await getAuthHeaderAsync();
         const headers = {
-            'X-Emby-Authorization': getAuthHeader()
+            'X-Emby-Authorization': authHeader
         };
 
         // This endpoint returns 200 { Authenticated: true } if authorized
@@ -507,8 +532,9 @@ export const jellyfinApi = {
 
     authenticateWithQuickConnect: async (secret: string) => {
         const { serverUrl } = useAuthStore.getState();
+        const authHeader = await getAuthHeaderAsync();
         const headers = {
-            'X-Emby-Authorization': getAuthHeader()
+            'X-Emby-Authorization': authHeader
         };
 
         // Exchange the validated secret for an access token
@@ -517,5 +543,79 @@ export const jellyfinApi = {
             { headers, timeout: 5000 }
         );
         return response.data;
-    }
+    },
+
+    // Session Management & Remote Control
+    getSessions: async () => {
+        const api = getApiClient();
+        const response = await api.get('/Sessions', { timeout: 10000 });
+        return response.data;
+    },
+
+    sendGeneralCommand: async (sessionId: string, command: string, args?: Record<string, string>) => {
+        const api = getApiClient();
+        const response = await api.post(`/Sessions/${sessionId}/Playing/Command`, {
+            Name: command,
+            Arguments: args || {}
+        });
+        return response.data;
+    },
+
+    signOutSession: async (sessionId: string) => {
+        const api = getApiClient();
+        const response = await api.delete(`/Sessions/${sessionId}`);
+        return response.data;
+    },
+
+    reportCapabilities: async () => {
+        const api = getApiClient();
+        const deviceId = await waitForDeviceId();
+
+        const capabilities = {
+            PlayableMediaTypes: ['Audio'],
+            SupportedCommands: [
+                'Play', 'Pause', 'Stop', 'Seek',
+                'VolumeUp', 'VolumeDown', 'Mute', 'Unmute',
+                'NextTrack', 'PreviousTrack'
+            ],
+            SupportsMediaControl: true,
+            SupportsPersistentIdentifier: true,
+        };
+
+        try {
+            await api.post('/Sessions/Capabilities', capabilities);
+        } catch (e) {
+            console.warn('[API] reportCapabilities failure:', e);
+        }
+
+        return true;
+    },
+
+    reportPlaybackProgress: async (params: {
+        ItemId: string;
+        PositionTicks: number;
+        IsPaused: boolean;
+        VolumeLevel?: number;
+    }) => {
+        const api = getApiClient();
+        // This notifies the server about our local playback state
+        // /Sessions/Playing/Progress
+        const response = await api.post('/Sessions/Playing/Progress', params);
+        return response.data;
+    },
+
+    reportPlaybackStart: async (itemId: string) => {
+        const api = getApiClient();
+        const response = await api.post('/Sessions/Playing', { ItemId: itemId });
+        return response.data;
+    },
+
+    reportPlaybackStopped: async (itemId: string, positionTicks: number) => {
+        const api = getApiClient();
+        const response = await api.post('/Sessions/Playing/Stopped', {
+            ItemId: itemId,
+            PositionTicks: positionTicks
+        });
+        return response.data;
+    },
 };

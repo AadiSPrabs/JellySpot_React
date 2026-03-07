@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Dimensions, Image, Animated, PanResponder, LayoutAnimation, Platform, UIManager, Alert } from 'react-native';
-import { Text, IconButton, useTheme, Surface, ActivityIndicator, Portal, Dialog, List, Button, Snackbar } from 'react-native-paper';
+import { Text, IconButton, useTheme, Surface, ActivityIndicator, Portal, List, Button, Snackbar } from 'react-native-paper';
 import { usePlayerStore } from '../store/playerStore';
 import { jellyfinApi } from '../api/jellyfin';
 import { SeekBar } from '../components/SeekBar';
@@ -15,7 +15,6 @@ import { DatabaseService } from '../services/DatabaseService';
 import { audioService } from '../services/AudioService';
 import { downloadService } from '../services/DownloadService';
 import { ScrollView } from 'react-native';
-import QueueBottomSheet from '../components/QueueBottomSheet';
 import ActionSheet from '../components/ActionSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
@@ -41,7 +40,7 @@ interface PlayerScreenProps {
 
 export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Select specific fields to avoid re-rendering on positionMillis updates
-    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer, isQueueVisible, setQueueVisible } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
         togglePlayPause: state.togglePlayPause,
@@ -55,8 +54,6 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
         playTrack: state.playTrack,
         sleepTimerTarget: state.sleepTimerTarget,
         setSleepTimer: state.setSleepTimer,
-        isQueueVisible: state.isQueueVisible,
-        setQueueVisible: state.setQueueVisible
     })));
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
@@ -400,21 +397,6 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     const [playlists, setPlaylists] = useState<any[]>([]);
     const [isAddToPlaylistVisible, setIsAddToPlaylistVisible] = useState(false);
 
-    // DEBUG: Check user policy
-    useEffect(() => {
-        const checkPolicy = async () => {
-            const user = useAuthStore.getState().user;
-            if (user?.token) {
-                try {
-                    const me = await jellyfinApi.getMe(user.token);
-                    console.log('User Policy:', JSON.stringify(me.Policy, null, 2));
-                } catch (e) {
-                    console.error('Failed to get user policy', e);
-                }
-            }
-        }
-        checkPolicy();
-    }, []);
     const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
     const [isDuplicateDialogVisible, setIsDuplicateDialogVisible] = useState(false);
     const [pendingPlaylistId, setPendingPlaylistId] = useState<string | null>(null);
@@ -443,9 +425,6 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
     // Get dataSource to check if we're in local mode
     const { dataSource } = useSettingsStore();
-
-    // Get local library favorites functions
-    const localLibrary = useLocalLibraryStore();
 
     // Check if current track is a local track (needed for like functionality)
     const isLocalTrack = currentTrack?.streamUrl?.startsWith('file://') ||
@@ -927,11 +906,11 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                                 />
                                 <IconButton
                                     icon="playlist-music"
-                                    iconColor={isQueueVisible ? playerColors.activeColor : playerColors.secondaryTextColor}
+                                    iconColor={playerColors.secondaryTextColor}
                                     size={22}
                                     onPress={() => {
-                                        setQueueVisible(!isQueueVisible);
-                                        if (!isQueueVisible) setIsLyricsVisible(false);
+                                        navigation.navigate('Queue');
+                                        setIsLyricsVisible(false);
                                     }}
                                 />
                                 <IconButton
@@ -1113,7 +1092,6 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                                     size={24}
                                     onPress={() => {
                                         setIsLyricsVisible(!isLyricsVisible);
-                                        if (!isLyricsVisible) setQueueVisible(false);
                                     }}
                                 />
 
@@ -1163,11 +1141,11 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
                                 <IconButton
                                     icon="playlist-music"
-                                    iconColor={isQueueVisible ? playerColors.activeColor : playerColors.secondaryTextColor}
+                                    iconColor={playerColors.secondaryTextColor}
                                     size={24}
                                     onPress={() => {
-                                        setQueueVisible(!isQueueVisible);
-                                        if (!isQueueVisible) setIsLyricsVisible(false);
+                                        navigation.navigate('Queue');
+                                        setIsLyricsVisible(false);
                                     }}
                                 />
                             </View>
@@ -1389,14 +1367,6 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
             </ActionSheet>
 
             {/* AddToPlaylistDialog Component Removed/Inline */}
-
-            {/* Queue Bottom Sheet */}
-            <QueueBottomSheet
-                visible={isQueueVisible}
-                onClose={() => setQueueVisible(false)}
-                activeColor={playerColors.activeColor}
-                backgroundColor="#000000"
-            />
 
             {/* Orientation Transition Curtain */}
             <Animated.View

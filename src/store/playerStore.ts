@@ -49,8 +49,6 @@ interface PlayerState {
     setPlayerExpanded: (expanded: boolean) => void;
     heroCardVisible: boolean;
     setHeroCardVisible: (visible: boolean) => void;
-    isQueueVisible: boolean;
-    setQueueVisible: (visible: boolean) => void;
 }
 
 // Network state cache for battery optimization (30-second TTL)
@@ -186,8 +184,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     setPlayerExpanded: (expanded: boolean) => set({ isPlayerExpanded: expanded }),
     heroCardVisible: false,
     setHeroCardVisible: (visible: boolean) => set({ heroCardVisible: visible }),
-    isQueueVisible: false,
-    setQueueVisible: (visible: boolean) => set({ isQueueVisible: visible }),
 
     // Initialize listeners
     init: async () => {
@@ -237,9 +233,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
                 // Record play for the PREVIOUS track now that we know we moved on
                 if (previousTrack && previousTrack.id !== newTrack.id) {
-                    // Fire and forget recording to not block track change
                     const source = previousTrack.streamUrl?.startsWith('file://') ? 'local' : 'jellyfin';
                     DatabaseService.recordPlay(previousTrack, source, 0, false, previousTrack.playlistId).catch(() => { });
+
+                    // Also report stop to Jellyfin if not local
+                    if (source === 'jellyfin') {
+                        jellyfinApi.reportPlaybackStopped(previousTrack.id, get().positionMillis * 10000).catch(() => { });
+                    }
+                }
+
+                // Report new track start to Jellyfin
+                if (!newTrack.streamUrl?.startsWith('file://')) {
+                    jellyfinApi.reportPlaybackStart(newTrack.id).catch(() => { });
                 }
             }
 
@@ -295,6 +300,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         // Progress update throttling for battery optimization
         let lastProgressUpdate = 0;
+        let lastServerProgressUpdate = 0;
         const BACKGROUND_THROTTLE_MS = 5000; // Only update every 5 seconds in background
 
         const sub5 = TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, async (event: any) => {
@@ -323,6 +329,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 positionMillis: positionMs,
                 durationMillis: durationMs
             });
+
+            // Sync with Jellyfin server (throttled)
+            const { currentTrack, isPlaying } = get();
+            if (currentTrack && !currentTrack.streamUrl?.startsWith('file://')) {
+                const now = Date.now();
+                // Update server every 10 seconds or when app is in foreground and significant time passed
+                const syncThrottle = isBackground ? 30000 : 10000;
+                if (!lastServerProgressUpdate || (now - lastServerProgressUpdate) >= syncThrottle) {
+                    lastServerProgressUpdate = now;
+                    jellyfinApi.reportPlaybackProgress({
+                        ItemId: currentTrack.id,
+                        PositionTicks: positionMs * 10000,
+                        IsPaused: !isPlaying,
+                    }).catch(() => { });
+                }
+            }
         });
         listenerCleanups.push(() => sub5.remove());
 
@@ -423,6 +445,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     playTrack: async (track) => {
         set({ playbackError: null }); // Clear previous errors
 
+        const { useRemoteStore } = require('./remoteStore');
+        const { webSocketService } = require('../services/WebSocketService');
+        const remoteState = useRemoteStore.getState();
+
+        // DELEGATION: If a remote session is selected, send command and update LOCAL UI STATE ONLY
+        if (!remoteState.isTargetLocal()) {
+            const sessionId = remoteState.targetSessionId;
+            if (sessionId) {
+                console.log('[PlayerStore] Remote Play:', track.name, 'on', sessionId);
+                set({ currentTrack: track, isPlaying: true, positionMillis: 0, durationMillis: track.durationMillis || 0 });
+                webSocketService.sendCommand(sessionId, 'Play', { ItemIds: [track.id] });
+                return;
+            }
+        }
+
         // INSTANT UI UPDATE: Update store BEFORE native calls so UI reflects immediately
         const { queue } = get();
         let currentIndex = queue.findIndex(t => t.id === track.id);
@@ -487,6 +524,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     togglePlayPause: async () => {
         const { isPlaying, currentTrack, playTrack } = get();
+
+        const { useRemoteStore } = require('./remoteStore');
+        const { webSocketService } = require('../services/WebSocketService');
+        const remoteState = useRemoteStore.getState();
+
+        if (!remoteState.isTargetLocal()) {
+            const sessionId = remoteState.targetSessionId;
+            if (sessionId) {
+                set({ isPlaying: !isPlaying });
+                webSocketService.sendCommand(sessionId, 'TogglePause');
+                return;
+            }
+        }
 
         if (isPlaying) {
             set({ isPlaying: false });
@@ -647,6 +697,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         const targetTrack = queue[targetIndex];
 
+        const { useRemoteStore } = require('./remoteStore');
+        const { webSocketService } = require('../services/WebSocketService');
+        const remoteState = useRemoteStore.getState();
+
+        if (!remoteState.isTargetLocal()) {
+            const sessionId = remoteState.targetSessionId;
+            if (sessionId) {
+                set({ currentTrack: targetTrack, positionMillis: 0, durationMillis: targetTrack.durationMillis || 0 });
+                webSocketService.sendCommand(sessionId, 'NextTrack');
+                return;
+            }
+        }
+
         // Seamless Skip Check
         try {
             const nativeQueue = await audioService.getQueue();
@@ -696,15 +759,43 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             return;
         }
 
-        await playTrack(queue[targetIndex]);
+        const targetTrack = queue[targetIndex];
+
+        const { useRemoteStore } = require('./remoteStore');
+        const { webSocketService } = require('../services/WebSocketService');
+        const remoteState = useRemoteStore.getState();
+
+        if (!remoteState.isTargetLocal()) {
+            const sessionId = remoteState.targetSessionId;
+            if (sessionId) {
+                set({ currentTrack: targetTrack, positionMillis: 0, durationMillis: targetTrack.durationMillis || 0 });
+                webSocketService.sendCommand(sessionId, 'PreviousTrack');
+                return;
+            }
+        }
+
+        await playTrack(targetTrack);
     },
 
     seek: async (positionMillis) => {
         const { currentTrack } = get();
-        if (currentTrack) {
-            await audioService.seek(positionMillis); // Service handles conversion
-            set({ positionMillis });
+        if (!currentTrack) return;
+
+        const { useRemoteStore } = require('./remoteStore');
+        const { webSocketService } = require('../services/WebSocketService');
+        const remoteState = useRemoteStore.getState();
+
+        if (!remoteState.isTargetLocal()) {
+            const sessionId = remoteState.targetSessionId;
+            if (sessionId) {
+                set({ positionMillis });
+                webSocketService.sendCommand(sessionId, 'Seek', { PositionTicks: positionMillis * 10000 });
+                return;
+            }
         }
+
+        await audioService.seek(positionMillis); // Service handles conversion
+        set({ positionMillis });
     },
 
     toggleShuffle: () => {

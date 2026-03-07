@@ -4,6 +4,7 @@ export type RootStackParamList = {
     Auth: undefined;
     Main: NavigatorScreenParams<MainTabParamList>;
     Player: undefined;
+    Queue: undefined;
 };
 
 export type AuthStackParamList = {

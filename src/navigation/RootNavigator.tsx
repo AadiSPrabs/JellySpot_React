@@ -6,6 +6,7 @@ import { RootStackParamList } from '../types/navigation';
 import AuthNavigator from './AuthNavigator';
 import MainNavigator from './MainNavigator';
 import PlayerScreen from '../screens/PlayerScreen';
+import QueueScreen from '../screens/QueueScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import { useAuthStore } from '../store/authStore';
 import { usePlayerStore } from '../store/playerStore';
@@ -17,12 +18,21 @@ import { useTheme } from 'react-native-paper';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+const MainShell = () => {
+    const theme = useTheme();
+    return (
+        <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+            <MainNavigator />
+            <GlobalPlayer />
+        </View>
+    );
+};
+
 export default function RootNavigator() {
     const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
     const currentTrack = usePlayerStore((state) => state.currentTrack);
     const { onboardingComplete, sourceMode, dataSource } = useSettingsStore();
     const theme = useTheme();
-    const [isPlayerVisible, setIsPlayerVisible] = useState(false);
     const navigationRef = React.useRef<NavigationContainerRef<RootStackParamList>>(null);
 
     // Show onboarding first if not completed
@@ -49,10 +59,6 @@ export default function RootNavigator() {
         <NavigationContainer
             theme={theme as any}
             ref={navigationRef}
-            onStateChange={() => {
-                const currentRouteName = navigationRef.current?.getCurrentRoute()?.name;
-                setIsPlayerVisible(currentRouteName === 'Player');
-            }}
         >
             <StatusBar style="light" />
             <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
@@ -65,13 +71,22 @@ export default function RootNavigator() {
                 >
                     {canAccessMain ? (
                         <>
-                            <Stack.Screen name="Main" component={MainNavigator} />
+                            <Stack.Screen name="Main" component={MainShell} />
+                            <Stack.Screen
+                                name="Queue"
+                                component={QueueScreen}
+                                options={{
+                                    presentation: 'transparentModal',
+                                    animation: 'slide_from_right',
+                                    animationDuration: 200, // Quicker transition
+                                    contentStyle: { backgroundColor: theme.colors.background }
+                                }}
+                            />
                         </>
                     ) : (
                         <Stack.Screen name="Auth" component={AuthNavigator} />
                     )}
                 </Stack.Navigator>
-                {canAccessMain && <GlobalPlayer />}
             </View>
         </NavigationContainer>
     );

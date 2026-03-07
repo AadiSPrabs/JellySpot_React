@@ -62,7 +62,8 @@
             "ndkVersion": "26.1.10909125"
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

@@ -1137,7 +1137,7 @@ export default function DetailScreen() {
                 contentContainerStyle={[styles.listContent, { paddingBottom: 200 }]}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
                 getItemLayout={(data, index) => (
-                    { length: 72, offset: 72 * index, index }
+                    { length: 66, offset: 66 * index, index }
                 )}
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
