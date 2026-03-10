@@ -1334,21 +1334,22 @@ export default function HomeScreen() {
 
     const renderArtistItem = ({ item }: { item: MediaItem }) => {
         const imageUrl = dataSource === 'local' ? item.imageUrl : jellyfinApi.getImageUrl(item.Id);
+        const artistItemSize = 160;
         return (
-            <TouchableOpacity style={{ marginRight: 16, alignItems: 'center', width: 130 }} onPress={() => handleItemPress(item)}>
-                <View style={{ width: 130, height: 130, borderRadius: 65, overflow: 'hidden' }}>
+            <TouchableOpacity style={{ marginRight: 16, alignItems: 'center', width: artistItemSize }} onPress={() => handleItemPress(item)}>
+                <View style={{ width: artistItemSize, height: artistItemSize, borderRadius: 16, overflow: 'hidden' }}>
                     <ImageWithFallback
                         uri={imageUrl}
-                        style={{ width: 130, height: 130, borderRadius: 65 }}
+                        style={{ width: artistItemSize, height: artistItemSize, borderRadius: 16 }}
                         fallbackIcon="account-music"
-                        iconSize={48}
+                        iconSize={56}
                         iconColor={theme.colors.onSurfaceVariant}
                         backgroundColor={theme.colors.surfaceVariant}
-                        borderRadius={65}
+                        borderRadius={16}
                     />
-                    {/* Name overlay at bottom of circle */}
-                    <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-                        <Text variant="labelMedium" numberOfLines={1} style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>{item.Name}</Text>
+                    {/* Name overlay at bottom of square */}
+                    <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 8, paddingHorizontal: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>
+                        <Text variant="labelLarge" numberOfLines={1} style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>{item.Name}</Text>
                     </View>
                 </View>
             </TouchableOpacity>

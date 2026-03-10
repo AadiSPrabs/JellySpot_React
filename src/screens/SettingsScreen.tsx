@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, useWindowDimensions, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, Alert, Linking } from 'react-native';
 import { Text, List, Avatar, Button, useTheme, Divider, Surface, IconButton, Snackbar } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../store/authStore';
@@ -155,11 +155,11 @@ export default function SettingsScreen() {
                         icon="information-outline"
                     />
                     <SettingsItem
-                        title="Dependencies"
-                        description="View Open Source Libraries"
-                        icon="package-variant"
-                        onPress={() => navigation.navigate('Dependencies' as any)}
-                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
+                        title="GitHub Repository"
+                        description="View source code"
+                        icon="github"
+                        onPress={() => Linking.openURL('https://github.com/AadiSPrabs/JellySpot_React')}
+                        right={() => <MaterialCommunityIcons name="open-in-new" size={20} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                 </SettingsGroup>
 
