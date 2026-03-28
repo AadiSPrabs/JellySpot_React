@@ -63,6 +63,37 @@ A premium, feature-rich music player built with React Native (Expo) that seamles
    npx expo start
    ```
 
+## 🛠️ Self-Hosting & Development
+
+To build your own version of Jellyspot, follow these configuration steps:
+
+### 1. Configure Expo Identifiers
+Modify `app.json` to link the app to your own Expo account:
+- Change `"package"` and `"bundleIdentifier"` to a unique name.
+- Run `eas project:init` to generate your own `projectId`.
+
+### 2. Prerequisites
+- **Android**: Install [Android Studio](https://developer.android.com/studio) and set up the Android SDK (API Level 34+).
+- **iOS**: A Mac with Xcode 15+ and CocoaPods installed.
+- **Node.js**: Version 18 or higher is recommended.
+
+### 3. Build Patterns
+Jellyspot uses custom native modules (Skia, Reanimated). While it works with **Expo Go**, some advanced features may require a **Development Build**:
+```bash
+# To create a local development build
+npx expo run:android
+npx expo run:ios
+```
+
+## 🧩 Project Structure
+
+- `src/api`: Jellyfin API integration layer.
+- `src/components`: Reusable UI elements (Mesh Background, Lyrics View, etc.).
+- `src/db`: SQLite schema and Drizzle ORM configuration.
+- `src/screens`: Main application screens and navigation logic.
+- `src/store`: Zustand state management (Auth, Settings, Player).
+- `src/utils`: Color extraction and audio processing helpers.
+
 ## 📱 Screenshots
 
 <div align="center">

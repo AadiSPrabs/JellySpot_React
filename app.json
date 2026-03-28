@@ -19,7 +19,7 @@
           "audio"
         ]
       },
-      "bundleIdentifier": "com.aadityaprabhu.jellyspot"
+      "bundleIdentifier": "com.yourname.jellyspot"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +29,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.aadityaprabhu.jellyspot",
+      "package": "com.yourname.jellyspot",
       "permissions": [
         "FOREGROUND_SERVICE",
         "WAKE_LOCK",
@@ -67,9 +67,8 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "cef6b2cf-ad63-46ed-8543-a73469363c3c"
+        "projectId": "YOUR_EAS_PROJECT_ID"
       }
-    },
-    "owner": "intelli453"
+    }
   }
 }
