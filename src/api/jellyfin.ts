@@ -225,9 +225,20 @@ export const jellyfinApi = {
         return response.data;
     },
 
-    getImageUrl: (itemId: string, type: 'Primary' | 'Backdrop' = 'Primary') => {
+    getImageUrl: (itemId: string, type: 'Primary' | 'Backdrop' = 'Primary', options?: { maxWidth?: number, maxHeight?: number, quality?: number }) => {
         const { serverUrl } = useAuthStore.getState();
-        return `${serverUrl}/Items/${itemId}/Images/${type}`;
+        let url = `${serverUrl}/Items/${itemId}/Images/${type}`;
+        if (options) {
+            const params = new URLSearchParams();
+            if (options.maxWidth) params.append('maxWidth', options.maxWidth.toString());
+            if (options.maxHeight) params.append('maxHeight', options.maxHeight.toString());
+            if (options.quality) params.append('quality', options.quality.toString());
+            const queryString = params.toString();
+            if (queryString) {
+                url += `?${queryString}`;
+            }
+        }
+        return url;
     },
 
     getUserImageUrl: (userId: string) => {
@@ -305,15 +316,14 @@ export const jellyfinApi = {
     getGenres: async (limit = 20) => {
         const api = getApiClient();
         const { user } = useAuthStore.getState();
-        const response = await api.get(`/Genres`, {
+        const response = await api.get(`/MusicGenres`, {
             params: {
                 Recursive: true,
                 Fields: 'PrimaryImageAspectRatio,ItemCounts',
                 UserId: user?.id,
-                IncludeItemTypes: 'Audio', // Filter to only Audio genres
                 Limit: limit,
-                SortBy: 'ItemCounts', // Sort by popularity
-                SortOrder: 'Descending'
+                SortBy: 'SortName',
+                SortOrder: 'Ascending'
             },
             timeout: 20000
         });

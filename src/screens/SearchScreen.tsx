@@ -425,15 +425,15 @@ export default function SearchScreen() {
                         autoCapitalize="none"
                         autoCorrect={false}
                     />
-                    {query.length > 0 && (
+                    {query.length > 0 ? (
                         <TouchableOpacity onPress={clearSearch}>
                             <X color={theme.colors.onSurfaceVariant} size={20} />
                         </TouchableOpacity>
-                    )}
+                    ) : null}
                 </View>
 
                 {/* Filters (Only show when searching or just before results) */}
-                {query.length > 0 && (
+                {query.length > 0 ? (
                     <View style={styles.filterContainer}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
                             {['All', 'Songs', 'Artists', 'Albums'].map((f) => (
@@ -450,7 +450,7 @@ export default function SearchScreen() {
                             ))}
                         </ScrollView>
                     </View>
-                )}
+                ) : null}
 
                 {/* Main Content */}
                 {loading ? (
@@ -458,7 +458,7 @@ export default function SearchScreen() {
                 ) : query.length === 0 ? (
                     /* Empty State: Browse Categories & History */
                     <View style={styles.browseContainer}>
-                        {searchHistory.length > 0 && (
+                        {searchHistory.length > 0 ? (
                             <View style={{ marginBottom: 24 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                                     <Text style={[styles.sectionTitle, { color: theme.colors.onSurface, marginBottom: 0 }]}>Recent Searches</Text>
@@ -479,7 +479,7 @@ export default function SearchScreen() {
                                     ))}
                                 </ScrollView>
                             </View>
-                        )}
+                        ) : null}
                         <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>Browse All</Text>
                         {genresLoading ? (
                             <ActivityIndicator style={{ marginTop: 20 }} color={theme.colors.primary} />

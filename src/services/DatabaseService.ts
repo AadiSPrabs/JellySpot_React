@@ -150,6 +150,29 @@ export const DatabaseService = {
         return await db.select().from(tracks).where(eq(tracks.artist, artistName)).orderBy(asc(tracks.name));
     },
 
+    // Get Albums by Artist (Grouped)
+    async getAlbumsByArtist(artistIdOrName: string) {
+        try {
+            return await db.select({
+                Id: tracks.album, // Use album name as ID for local
+                Name: tracks.album,
+                ImageUrl: tracks.imageUrl,
+                Type: sql<string>`'MusicAlbum'`,
+                ProductionYear: sql<number>`0` // Placeholder
+            })
+                .from(tracks)
+                .where(or(
+                    eq(tracks.artistId, artistIdOrName),
+                    eq(tracks.artist, artistIdOrName)
+                ))
+                .groupBy(tracks.album)
+                .orderBy(desc(tracks.album));
+        } catch (e) {
+            console.error('getAlbumsByArtist error:', e);
+            return [];
+        }
+    },
+
     // Get Tracks by Album
     async getTracksByAlbum(albumName: string) {
         return await db.select().from(tracks).where(eq(tracks.album, albumName)).orderBy(asc(tracks.trackNumber));
@@ -470,6 +493,103 @@ export const DatabaseService = {
             .from(playHistory)
             .where(eq(playHistory.trackId, trackId));
         return result[0]?.count || 0;
+    },
+
+    // Get comprehensive listening stats (Spotify Wrapped style)
+    async getListeningStats(source: 'local' | 'jellyfin') {
+        try {
+            const now = new Date();
+            const lastMonth = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+            const lastYear = new Date(now.getTime() - (365 * 24 * 60 * 60 * 1000));
+
+            // NOTE: playedAt uses Drizzle's mode:'timestamp' which stores as Unix SECONDS.
+            // Raw SQL comparisons must use seconds (not milliseconds from .getTime()).
+            const lastMonthSec = Math.floor(lastMonth.getTime() / 1000);
+            const lastYearSec = Math.floor(lastYear.getTime() / 1000);
+
+            // 1. Total Listening Time (all-time)
+            const allTimeResult = await db.select({
+                totalDurationMs: sql<number>`SUM(${playHistory.playDurationMs})`
+            })
+            .from(playHistory)
+            .where(eq(playHistory.source, source));
+
+            // 2. Total Listening Time (last month)
+            const monthResult = await db.select({
+                totalDurationMs: sql<number>`SUM(${playHistory.playDurationMs})`
+            })
+            .from(playHistory)
+            .where(
+                and(
+                    eq(playHistory.source, source),
+                    sql`${playHistory.playedAt} >= ${lastMonthSec}`
+                )
+            );
+
+            // 3. Total Listening Time (last year)
+            const yearResult = await db.select({
+                totalDurationMs: sql<number>`SUM(${playHistory.playDurationMs})`
+            })
+            .from(playHistory)
+            .where(
+                and(
+                    eq(playHistory.source, source),
+                    sql`${playHistory.playedAt} >= ${lastYearSec}`
+                )
+            );
+
+            // 4. Daily Breakdown for the last 7 days
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            const sevenDaysAgoSec = Math.floor(sevenDaysAgo.getTime() / 1000);
+            const weekResult = await db.select({
+                playedAt: playHistory.playedAt,
+                playDurationMs: playHistory.playDurationMs
+            })
+            .from(playHistory)
+            .where(
+                and(
+                    eq(playHistory.source, source),
+                    sql`${playHistory.playedAt} >= ${sevenDaysAgoSec}`
+                )
+            );
+
+            // Group weekResult in JS for chart
+            const dailyStats = [0, 0, 0, 0, 0, 0, 0];
+            const todayDate = new Date();
+            todayDate.setHours(0, 0, 0, 0);
+            const todayMs = todayDate.getTime();
+
+            weekResult.forEach(row => {
+                // playedAt comes back as a Date from Drizzle (mode:'timestamp')
+                const playedAt = row.playedAt instanceof Date ? row.playedAt : (typeof row.playedAt === 'number' ? new Date(row.playedAt * 1000) : new Date(0));
+                
+                const playedDate = new Date(playedAt);
+                playedDate.setHours(0, 0, 0, 0);
+                const playedMs = playedDate.getTime();
+
+                // Calculate difference in days (0 = today, 1 = yesterday, etc.)
+                const diffDays = Math.round((todayMs - playedMs) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays >= 0 && diffDays < 7) {
+                    dailyStats[6 - diffDays] += (row.playDurationMs || 0) / 60000;
+                }
+            });
+
+            const allTimeMinutes = Math.floor((allTimeResult[0]?.totalDurationMs || 0) / 60000);
+            const monthMinutes = Math.floor((monthResult[0]?.totalDurationMs || 0) / 60000);
+            const yearMinutes = Math.floor((yearResult[0]?.totalDurationMs || 0) / 60000);
+
+            return {
+                allTimeMinutes,
+                monthMinutes,
+                yearMinutes,
+                dailyStats: dailyStats.map(m => Math.floor(m))
+            };
+
+        } catch (error) {
+            console.error('getListeningStats error:', error);
+            return { allTimeMinutes: 0, monthMinutes: 0, yearMinutes: 0, dailyStats: [0, 0, 0, 0, 0, 0, 0] };
+        }
     },
 
     // Clear play history (for privacy)

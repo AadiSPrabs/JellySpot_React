@@ -23,6 +23,7 @@ export type HomeStackParamList = {
     Home: undefined;
     Detail: { itemId: string; type: string };
     Settings: undefined;
+    Stats: undefined;
     Appearance: undefined;
     PlaybackSettings: undefined;
     StorageSettings: undefined;
@@ -41,6 +42,7 @@ export type LibraryStackParamList = {
     Library: undefined;
     Detail: { itemId: string; type: string };
     Settings: undefined;
+    Stats: undefined;
     Appearance: undefined;
     PlaybackSettings: undefined;
     StorageSettings: undefined;

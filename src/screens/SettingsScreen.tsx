@@ -4,6 +4,7 @@ import { Text, List, Avatar, Button, useTheme, Divider, Surface, IconButton, Sna
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { jellyfinApi } from '../api/jellyfin';
 import { useNavigation } from '@react-navigation/native';
 import { backupService } from '../services/BackupService';
@@ -17,8 +18,14 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 export default function SettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
-    const { user, serverUrl } = useAuthStore();
-    const { sourceMode, localProfile } = useSettingsStore();
+    const { user, serverUrl } = useAuthStore(useShallow(state => ({
+        user: state.user,
+        serverUrl: state.serverUrl,
+    })));
+    const { sourceMode, localProfile } = useSettingsStore(useShallow(state => ({
+        sourceMode: state.sourceMode,
+        localProfile: state.localProfile,
+    })));
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
 
@@ -100,6 +107,13 @@ export default function SettingsScreen() {
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
+                        title="Listening Tracker"
+                        description="View your listening habits & stats"
+                        icon="chart-bar"
+                        onPress={() => navigation.navigate('Stats' as any)}
+                        right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
+                    />
+                    <SettingsItem
                         title="Playback"
                         description="Audio Quality, Crossfade, Speed"
                         icon="play-circle-outline"
@@ -151,7 +165,7 @@ export default function SettingsScreen() {
                 <SettingsGroup title="About">
                     <SettingsItem
                         title="Version"
-                        description="1.0.0"
+                        description="1.1.0"
                         icon="information-outline"
                     />
                     <SettingsItem

@@ -4,6 +4,7 @@ import { Text, Button, useTheme, Surface, IconButton, Switch, TextInput, Activit
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useSettingsStore, SourceMode } from '../store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '../store/authStore';
 import { jellyfinApi } from '../api/jellyfin';
 import { Server, Smartphone, Check, AlertCircle, Library } from 'lucide-react-native';
@@ -18,7 +19,13 @@ interface MusicLibrary {
 export default function SourceModeSettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
-    const { sourceMode, setSourceMode, setDataSource, selectedJellyfinLibraries, setSelectedJellyfinLibraries } = useSettingsStore();
+    const { sourceMode, setSourceMode, setDataSource, selectedJellyfinLibraries, setSelectedJellyfinLibraries } = useSettingsStore(useShallow(state => ({
+        sourceMode: state.sourceMode,
+        setSourceMode: state.setSourceMode,
+        setDataSource: state.setDataSource,
+        selectedJellyfinLibraries: state.selectedJellyfinLibraries,
+        setSelectedJellyfinLibraries: state.setSelectedJellyfinLibraries,
+    })));
     const { serverUrl, isAuthenticated, user, setServerUrl, login, logout } = useAuthStore();
 
     // Toggle states

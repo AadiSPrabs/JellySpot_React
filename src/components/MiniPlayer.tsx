@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useLayoutEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, TouchableOpacity, Animated, Dimensions, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Animated, Dimensions, useWindowDimensions, ActivityIndicator } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import { usePlayerStore } from '../store/playerStore';
@@ -10,7 +10,9 @@ import { RootStackParamList } from '../types/navigation';
 import { Surface, Text, useTheme } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Play, Pause, Music, Headphones, Monitor } from 'lucide-react-native';
-import { MiniProgressBar } from './MiniProgressBar';
+import { LiquidMiniProgressBar } from './LiquidMiniProgressBar';
+import ImageColors from 'react-native-image-colors';
+import { lightenHexColor } from '../utils/colorUtils';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
 
 import { audioService } from '../services/AudioService';
@@ -28,9 +30,10 @@ interface MiniPlayerProps {
 }
 
 export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProps) {
-    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, reset, queueLength, repeatMode } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlaying, isBuffering, togglePlayPause, playNext, playPrevious, reset, queueLength, repeatMode } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
+        isBuffering: state.isBuffering,
         togglePlayPause: state.togglePlayPause,
         playNext: state.playNext,
         playPrevious: state.playPrevious,
@@ -46,6 +49,7 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
     // Visibility State & Track Persistence
     const [isVisible, setIsVisible] = useState(!!currentTrack);
     const [imageError, setImageError] = useState(false);
+    const [miniPlayerColor, setMiniPlayerColor] = useState<string>(theme.colors.primary);
     const lastTrack = useRef(currentTrack);
     const trackToRender = currentTrack || lastTrack.current;
 
@@ -142,6 +146,25 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
             });
         }
     }, [currentTrack]);
+
+    // Extract color for the liquid progress bar
+    useEffect(() => {
+        if (currentTrack?.imageUrl) {
+            ImageColors.getColors(currentTrack.imageUrl, {
+                fallback: theme.colors.primary,
+                cache: true,
+                key: currentTrack.id,
+            }).then(colors => {
+                if (colors.platform === 'android') {
+                    setMiniPlayerColor(colors.vibrant || colors.dominant || theme.colors.primary);
+                } else if (colors.platform === 'ios') {
+                    setMiniPlayerColor(colors.primary || colors.background || theme.colors.primary);
+                }
+            }).catch(() => setMiniPlayerColor(theme.colors.primary));
+        } else {
+            setMiniPlayerColor(theme.colors.primary);
+        }
+    }, [currentTrack?.id]);
 
     // Gesture Handling - Using RNGH to play nicely with GlobalPlayer's gestures
     const panGesture = useMemo(() => {
@@ -271,7 +294,7 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                     accessibilityRole="button"
                     accessibilityLabel={`Now playing ${trackToRender.name} by ${trackToRender.artist}. Double tap to open player.`}
                 >
-                    <MiniProgressBar />
+                    <LiquidMiniProgressBar color={miniPlayerColor} />
                     <View style={styles.content}>
                         {trackToRender.imageUrl && !imageError ? (
                             <Image
@@ -296,9 +319,12 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                             style={[styles.playButton, { padding: 4 }]}
                             hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
                             accessibilityRole="button"
-                            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+                            accessibilityLabel={isBuffering ? "Loading" : isPlaying ? "Pause" : "Play"}
+                            disabled={isBuffering}
                         >
-                            {isPlaying ? (
+                            {isBuffering ? (
+                                <ActivityIndicator size={20} color={theme.colors.onSurface} />
+                            ) : isPlaying ? (
                                 <Pause size={24} color={theme.colors.onSurface} fill={theme.colors.onSurface} />
                             ) : (
                                 <Play size={24} color={theme.colors.onSurface} fill={theme.colors.onSurface} style={{ marginLeft: 2 }} />

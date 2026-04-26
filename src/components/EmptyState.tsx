@@ -28,12 +28,12 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
             <Text variant="titleLarge" style={[styles.title, { color: theme.colors.onSurface }]}>
                 {title}
             </Text>
-            {description && (
+            {!!description && (
                 <Text variant="bodyMedium" style={[styles.description, { color: theme.colors.onSurfaceVariant }]}>
                     {description}
                 </Text>
             )}
-            {actionLabel && onAction && (
+            {!!(actionLabel && onAction) && (
                 <Button
                     mode="contained-tonal"
                     onPress={onAction}

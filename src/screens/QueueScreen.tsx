@@ -12,8 +12,32 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from 'react-native-paper';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import Animated, { useAnimatedStyle, interpolate, Extrapolate, SharedValue } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Separate component for Right Actions to keep QueueItem lean
+const RightActions = ({ progress, dragX }: { progress: SharedValue<number>, dragX: SharedValue<number> }) => {
+    const styleAnimation = useAnimatedStyle(() => {
+        const opacity = interpolate(
+            dragX.value,
+            [-80, -40, 0],
+            [1, 0.5, 0],
+            Extrapolate.CLAMP
+        );
+        return {
+            opacity,
+            transform: [{ translateX: interpolate(dragX.value, [-80, 0], [0, 20], Extrapolate.CLAMP) }]
+        };
+    });
+
+    return (
+        <Animated.View style={[styles.deleteAction, styleAnimation]}>
+            <Icon name="trash-can-outline" size={24} color="white" />
+        </Animated.View>
+    );
+};
 
 // Optimized QueueItem
 const QueueItem = React.memo(({
@@ -21,8 +45,6 @@ const QueueItem = React.memo(({
     drag,
     isActive,
     isCurrent,
-    themeActiveColor,
-    theme,
     onPress,
     onRemove
 }: {
@@ -30,59 +52,66 @@ const QueueItem = React.memo(({
     drag: () => void,
     isActive: boolean,
     isCurrent: boolean,
-    themeActiveColor: string,
-    theme: any,
     onPress: (item: any) => void,
     onRemove: (id: string) => void
-}) => (
-    <TouchableOpacity
-        style={[
-            styles.queueItem,
-            isCurrent && { backgroundColor: `${themeActiveColor}20` },
-            isActive && { backgroundColor: `${themeActiveColor}30` }
-        ]}
-        onPress={() => onPress(item)}
-        onLongPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            drag();
-        }}
-        delayLongPress={200}
-        activeOpacity={0.7}
-    >
-        <View style={styles.dragHandleContainer}>
-            <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
-                <View style={{ width: 14, height: 2, backgroundColor: theme.colors.onSurfaceVariant, marginVertical: 2, borderRadius: 1 }} />
-                <View style={{ width: 14, height: 2, backgroundColor: theme.colors.onSurfaceVariant, marginVertical: 2, borderRadius: 1 }} />
-                <View style={{ width: 14, height: 2, backgroundColor: theme.colors.onSurfaceVariant, marginVertical: 2, borderRadius: 1 }} />
-            </View>
-        </View>
+}) => {
+    const theme = useTheme();
+    const themeActiveColor = theme.colors.primary;
 
-        <Image source={{ uri: item.imageUrl }} style={styles.queueImage} />
-
-        <View style={styles.trackInfo}>
-            <Text style={[styles.trackName, { color: isCurrent ? themeActiveColor : theme.colors.onSurface }]} numberOfLines={1}>
-                {item.name}
-            </Text>
-            <Text style={[styles.trackArtist, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
-                {item.artist}
-            </Text>
-        </View>
-
-        {isCurrent && <View style={[styles.playingDot, { backgroundColor: themeActiveColor }]} />}
-
-        <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => onRemove(item.queueItemId || item.id)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+    return (
+        <Swipeable
+            enabled={!isActive} // Disable swipe while dragging
+            renderRightActions={(progress, dragX) => <RightActions progress={progress} dragX={dragX} />}
+            onSwipeableWillOpen={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onRemove(item.queueItemId || item.id);
+            }}
+            friction={2}
+            rightThreshold={40}
         >
-            <Icon name="close" size={20} color={theme.colors.onSurfaceVariant} />
-        </TouchableOpacity>
-    </TouchableOpacity>
-), (prev, next) => (
-    (prev.item.queueItemId === next.item.queueItemId || prev.item.id === next.item.id) &&
+            <TouchableOpacity
+                style={[
+                    styles.queueItem,
+                    isCurrent && { backgroundColor: `${themeActiveColor}20` },
+                    isActive && { backgroundColor: `${themeActiveColor}30`, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65 }
+                ]}
+                onPress={() => onPress(item)}
+                activeOpacity={0.7}
+            >
+                <TouchableOpacity 
+                    style={styles.dragHandleContainer}
+                    onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        drag();
+                    }}
+                    delayLongPress={100}
+                >
+                    <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
+                        <View style={{ width: 14, height: 2, backgroundColor: theme.colors.onSurfaceVariant, marginVertical: 2, borderRadius: 1 }} />
+                        <View style={{ width: 14, height: 2, backgroundColor: theme.colors.onSurfaceVariant, marginVertical: 2, borderRadius: 1 }} />
+                        <View style={{ width: 14, height: 2, backgroundColor: theme.colors.onSurfaceVariant, marginVertical: 2, borderRadius: 1 }} />
+                    </View>
+                </TouchableOpacity>
+
+                <Image source={{ uri: item.imageUrl }} style={styles.queueImage} />
+
+                <View style={styles.trackInfo}>
+                    <RNText style={[styles.trackName, { color: isCurrent ? themeActiveColor : theme.colors.onSurface }]} numberOfLines={1}>
+                        {item.name}
+                    </RNText>
+                    <RNText style={[styles.trackArtist, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
+                        {item.artist}
+                    </RNText>
+                </View>
+
+                {isCurrent && <View style={[styles.playingDot, { backgroundColor: themeActiveColor }]} />}
+            </TouchableOpacity>
+        </Swipeable>
+    );
+}, (prev, next) => (
+    prev.item.queueItemId === next.item.queueItemId &&
     prev.isActive === next.isActive &&
-    prev.isCurrent === next.isCurrent &&
-    prev.themeActiveColor === next.themeActiveColor
+    prev.isCurrent === next.isCurrent
 ));
 
 export default function QueueScreen() {
@@ -92,14 +121,16 @@ export default function QueueScreen() {
     const hasScrolledRef = useRef(false);
     const insets = useSafeAreaInsets();
 
-    const { queue, currentTrack, playTrack, reorderQueue, removeFromQueue, clearQueue } = usePlayerStore(useShallow(state => ({
+    const { queue, currentTrack, reorderQueue, clearQueue } = usePlayerStore(useShallow(state => ({
         queue: state.queue,
         currentTrack: state.currentTrack,
-        playTrack: state.playTrack,
         reorderQueue: state.reorderQueue,
-        removeFromQueue: state.removeFromQueue,
         clearQueue: state.clearQueue,
     })));
+
+    // Actions from store - stable references
+    const playTrack = usePlayerStore.getState().playTrack;
+    const removeFromQueue = usePlayerStore.getState().removeFromQueue;
 
     const themeActiveColor = theme.colors.primary;
     const [listReady, setListReady] = React.useState(false);
@@ -107,7 +138,7 @@ export default function QueueScreen() {
     // Initial scroll to current track
     useEffect(() => {
         if (!hasScrolledRef.current && currentTrack && queue.length > 0) {
-            const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+            const currentIndex = queue.findIndex(t => (t.queueItemId || t.id) === (currentTrack.queueItemId || currentTrack.id));
             if (currentIndex >= 0) {
                 const timer = setTimeout(() => {
                     try {
@@ -129,27 +160,28 @@ export default function QueueScreen() {
         } else if (!currentTrack || queue.length === 0) {
             setListReady(true);
         }
-    }, [currentTrack?.id, queue.length]);
+    }, [currentTrack?.queueItemId, currentTrack?.id, queue.length]);
+
+    const currentTrackId = currentTrack?.id;
 
     const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<any>) => (
         <QueueItem
             item={item}
             drag={drag}
             isActive={isActive}
-            isCurrent={item.id === currentTrack?.id}
-            themeActiveColor={themeActiveColor}
-            theme={theme}
+            isCurrent={item.id === currentTrackId}
             onPress={playTrack}
             onRemove={removeFromQueue}
         />
-    ), [currentTrack?.id, themeActiveColor, theme, playTrack, removeFromQueue]);
+    ), [currentTrackId, playTrack, removeFromQueue]);
 
     const handleDragEnd = useCallback(({ from, to }: { from: number, to: number }) => {
         if (from === to) return;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         reorderQueue(from, to);
     }, [reorderQueue]);
 
-    const keyExtractor = useCallback((item: any, index: number) => item.queueItemId || item.id, []);
+    const keyExtractor = useCallback((item: any, index: number) => item.queueItemId || `queue-${index}-${item.id}`, []);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -157,12 +189,41 @@ export default function QueueScreen() {
 
             {/* Header */}
             <View style={styles.header}>
+                <IconButton
+                    icon="chevron-left"
+                    size={28}
+                    onPress={() => navigation.goBack()}
+                />
                 <View style={styles.headerTitleContainer}>
                     <Text variant="titleLarge" style={styles.title}>Queue</Text>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                        {queue.length} songs
+                        {queue.length} {queue.length === 1 ? 'song' : 'songs'}
                     </Text>
                 </View>
+                <IconButton
+                    icon="trash-can-outline"
+                    iconColor={theme.colors.error}
+                    size={24}
+                    onPress={() => {
+                        import('react-native').then(({ Alert }) => {
+                            Alert.alert(
+                                "Clear Queue",
+                                "Are you sure you want to clear the queue? Only the current song will remain.",
+                                [
+                                    { text: "Cancel", style: "cancel" },
+                                    { 
+                                        text: "Clear", 
+                                        style: "destructive", 
+                                        onPress: () => {
+                                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                                            clearQueue();
+                                        }
+                                    }
+                                ]
+                            );
+                        });
+                    }}
+                />
             </View>
 
             <View style={{ flex: 1 }}>
@@ -183,36 +244,23 @@ export default function QueueScreen() {
                         { opacity: listReady ? 1 : 0 }
                     ]}
                     showsVerticalScrollIndicator={true}
-                    initialNumToRender={10}
-                    maxToRenderPerBatch={5}
-                    windowSize={5}
-                    removeClippedSubviews={true}
+                    initialNumToRender={15}
+                    maxToRenderPerBatch={10}
+                    windowSize={11} // Increased for smoother scrolling
+                    removeClippedSubviews={Platform.OS === 'android'}
                     getItemLayout={(data, index) => ({ length: 66, offset: 66 * index, index })}
-                    activationDistance={10}
+                    activationDistance={15}
                     containerStyle={{ flex: 1 }}
                 />
 
                 {/* Bottom Action Bar */}
                 <View style={[styles.bottomBar, { paddingBottom: insets.bottom || 16, borderTopColor: theme.dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]}>
                     <Button
-                        mode="contained-tonal"
+                        mode="contained"
                         onPress={() => navigation.goBack()}
-                        style={styles.bottomButton}
-                        icon="chevron-left"
+                        style={[styles.bottomButton, { flex: 1 }]}
                     >
-                        Back
-                    </Button>
-                    <Button
-                        mode="text"
-                        onPress={() => {
-                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                            clearQueue();
-                        }}
-                        style={styles.bottomButton}
-                        textColor={theme.colors.error}
-                        icon="trash-can-outline"
-                    >
-                        Clear Queue
+                        Close
                     </Button>
                 </View>
             </View>
@@ -297,8 +345,12 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         marginHorizontal: 12,
     },
-    deleteButton: {
-        padding: 12,
-        opacity: 0.6,
+    deleteAction: {
+        backgroundColor: '#ff4444',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 80,
+        height: 64,
+        borderRadius: 12,
     },
 });

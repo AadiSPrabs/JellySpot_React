@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
 import { View, StyleSheet, TouchableOpacity, Dimensions, Image, Animated, PanResponder, LayoutAnimation, Platform, UIManager, Alert } from 'react-native';
 import { Text, IconButton, useTheme, Surface, ActivityIndicator, Portal, List, Button, Snackbar } from 'react-native-paper';
 import { usePlayerStore } from '../store/playerStore';
@@ -20,6 +20,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import LyricsView from '../components/LyricsView';
 import ArtworkCarousel from '../components/ArtworkCarousel';
+import MarqueeText from '../components/MarqueeText';
+import GrainOverlay from '../components/GrainOverlay';
 import { ProgressControl } from '../components/ProgressControl';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useShallow } from 'zustand/react/shallow';
@@ -34,15 +36,35 @@ import { useWindowDimensions } from 'react-native';
 
 // const { width } = Dimensions.get('window'); // Removed static width
 
+// Self-contained fade-in gradient layer — mounts invisible, fades in, never flashes
+function FadeInGradient({ colors }: { colors: [string, string] }) {
+    const opacity = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        Animated.timing(opacity, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+        }).start();
+    }, []); // Only runs on mount
+
+    return (
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity }]}>
+            <LinearGradient colors={colors} style={StyleSheet.absoluteFill} />
+        </Animated.View>
+    );
+}
+
 interface PlayerScreenProps {
     isGlobal?: boolean;
 }
 
 export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Select specific fields to avoid re-rendering on positionMillis updates
-    const { currentTrack, isPlaying, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlaying, isBuffering, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
+        isBuffering: state.isBuffering,
         togglePlayPause: state.togglePlayPause,
         playNext: state.playNext,
         playPrevious: state.playPrevious,
@@ -57,6 +79,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     })));
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
+    const localLibrary = useLocalLibraryStore();
     const { backgroundType, themeColor, showTechnicalDetails, audioQuality, playbackRate, setPlaybackRate } = useSettingsStore(useShallow(s => ({
         backgroundType: s.backgroundType,
         themeColor: s.themeColor,
@@ -73,6 +96,8 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
     // Track current image URL to detect changes and prevent stale updates
     const currentImageUrlRef = useRef<string | null>(null);
+
+    // (Background transition is handled by FadeInGradient layers)
 
     // Play tracking - record plays to database when track changes
     const previousTrackRef = useRef<{ track: any; startTime: number; duration: number } | null>(null);
@@ -142,8 +167,8 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
             // Don't reset extractedColors here - keep old colors visible during extraction
         }
 
-        // Only fetch if background type is blurhash (dynamic colors enabled) AND app is active
-        if (backgroundType !== 'blurhash' || !imageUrl || !isAppActive) {
+        // Only fetch if background type is dynamic (dominant) AND app is active
+        if (backgroundType !== 'dominant' || !imageUrl || !isAppActive) {
             return;
         }
 
@@ -185,7 +210,7 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
     // Calculate dynamic colors from extracted colors
     const dynamicColors = useMemo(() => {
-        if (!extractedColors || backgroundType !== 'blurhash') {
+        if (!extractedColors || backgroundType !== 'dominant') {
             return {
                 backgroundColor: fallbackBgRef.current,
                 gradientColors: [fallbackBgRef.current, '#000000'] as [string, string],
@@ -261,6 +286,8 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
         };
     }, [extractedColors, backgroundType, safeThemeColor]);
 
+    // (Old cross-fade removed — handled by FadeInGradient layer stacking)
+
     const playerColors = useMemo(() => {
         if (dynamicColors) {
             return {
@@ -290,96 +317,24 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
         };
     }, [dynamicColors, safeThemeColor, backgroundType]);
 
-    // A/B Layer swap pattern for flash-free transitions
-    // Layer A and Layer B alternate: we only change colors on the HIDDEN layer
-    const [layerAColor, setLayerAColor] = useState<string>('#1a1a1a');
-    const [layerBColor, setLayerBColor] = useState<string>('#1a1a1a');
-    const [layerAGradient, setLayerAGradient] = useState<[string, string]>(['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']);
-    const [layerBGradient, setLayerBGradient] = useState<[string, string]>(['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']);
+    // Robust layered background approach: Stack new colors on top and fade them in.
+    const [bgLayers, setBgLayers] = useState<Array<{ id: string, gradient: [string, string] }>>([]);
 
-    // 0 = Layer A on top (visible), Layer B hidden
-    // 1 = Layer B on top (visible), Layer A hidden
-    const layerBOpacity = useRef(new Animated.Value(0)).current;
-    const activeLayerRef = useRef<'A' | 'B'>('A'); // Which layer is currently visible
-    const isFirstRender = useRef(true);
-    const pendingAnimationRef = useRef<number | null>(null);
-
-    // Animate when background color changes
+    // When dynamicColors change, append a new layer
     useEffect(() => {
-        if (!dynamicColors?.backgroundColor) {
-            return;
+        if (dynamicColors?.gradientColors && backgroundType === 'dominant') {
+            setBgLayers(prev => {
+                // Keep only the last 2 layers to prevent memory leaks while allowing smooth overlapping fades
+                const nextLayers = [...prev, { id: Date.now().toString() + Math.random(), gradient: dynamicColors.gradientColors }];
+                return nextLayers.slice(-3);
+            });
         }
-
-        const newColor = dynamicColors.backgroundColor;
-        const newGradient: [string, string] = dynamicColors.gradientColors;
-
-        // Get current visible color
-        const currentVisibleColor = activeLayerRef.current === 'A' ? layerAColor : layerBColor;
-
-        // Skip animation on first render - just set colors directly
-        if (isFirstRender.current) {
-            isFirstRender.current = false;
-            setLayerAColor(newColor);
-            setLayerAGradient(newGradient);
-            setLayerBColor(newColor);
-            setLayerBGradient(newGradient);
-            layerBOpacity.setValue(0); // Layer A visible
-            activeLayerRef.current = 'A';
-            return;
-        }
-
-        if (newColor !== currentVisibleColor) {
-            // Clear any pending animation
-            if (pendingAnimationRef.current) {
-                clearTimeout(pendingAnimationRef.current);
-            }
-
-            if (activeLayerRef.current === 'A') {
-                // Layer A is visible, update Layer B (hidden) with new color, then fade it in
-                setLayerBColor(newColor);
-                setLayerBGradient(newGradient);
-
-                // Wait for state to settle, then animate Layer B in
-                pendingAnimationRef.current = setTimeout(() => {
-                    Animated.timing(layerBOpacity, {
-                        toValue: 1,
-                        duration: 500,
-                        useNativeDriver: true,
-                    }).start(() => {
-                        activeLayerRef.current = 'B';
-                    });
-                    pendingAnimationRef.current = null;
-                }, 32) as unknown as number;
-            } else {
-                // Layer B is visible, update Layer A (hidden) with new color, then fade Layer B out
-                setLayerAColor(newColor);
-                setLayerAGradient(newGradient);
-
-                // Wait for state to settle, then animate Layer B out (reveals Layer A)
-                pendingAnimationRef.current = setTimeout(() => {
-                    Animated.timing(layerBOpacity, {
-                        toValue: 0,
-                        duration: 500,
-                        useNativeDriver: true,
-                    }).start(() => {
-                        activeLayerRef.current = 'A';
-                    });
-                    pendingAnimationRef.current = null;
-                }, 32) as unknown as number;
-            }
-        }
-
-        return () => {
-            if (pendingAnimationRef.current) {
-                clearTimeout(pendingAnimationRef.current);
-            }
-        };
-    }, [dynamicColors?.backgroundColor]);
+    }, [dynamicColors?.gradientColors, backgroundType]);
 
 
 
     // Local state
-    const [isBuffering, setIsBuffering] = useState(false);
+    // isBuffering is now from the store selector above
     const [isLyricsVisible, setIsLyricsVisible] = useState(false);
     const [isSleepTimerVisible, setIsSleepTimerVisible] = useState(false);
     const [artworkError, setArtworkError] = useState(false);
@@ -690,24 +645,17 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     const getContrastingIconColor = getContrastingIconColorFromHex;
 
     return (
-        <View style={[styles.container, { backgroundColor: dynamicColors?.backgroundColor || '#1a1a1a' }]}>
+        <View style={[styles.container, { backgroundColor: '#1a1a1a' }]}>
             {/* Background Layer */}
-            {backgroundType === 'blurhash' ? (
-                // A/B Layer swap: Layer A always at bottom, Layer B fades on top
+            {backgroundType === 'dominant' ? (
                 <>
-                    {/* Layer A (bottom) */}
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: layerAColor, width: '100%', height: '100%' }]} />
-                    {/* Layer B (top, animates opacity) */}
-                    <Animated.View
-                        style={[
-                            StyleSheet.absoluteFill,
-                            {
-                                backgroundColor: layerBColor,
-                                opacity: layerBOpacity,
-                                width: '100%', height: '100%'
-                            }
-                        ]}
-                    />
+                    {/* Dark fallback base */}
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1a1a1a' }]} />
+                    
+                    {/* Render overlapping layers - newest layers fade in on top */}
+                    {bgLayers.map((layer) => (
+                        <FadeInGradient key={layer.id} colors={layer.gradient} />
+                    ))}
                 </>
             ) : backgroundType === 'blurred' && currentTrack?.imageUrl ? (
                 <ExpoImage
@@ -718,45 +666,23 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                     transition={1000}
                 />
             ) : (
-                // Dark grey background for 'off' mode
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1a1a1a' }]} />
             )}
 
-            {/* Gradient Overlay with A/B layer swap */}
-            {backgroundType === 'blurhash' ? (
-                <>
-                    {/* Layer A gradient (bottom) */}
-                    <LinearGradient
-                        colors={layerAGradient}
-                        style={StyleSheet.absoluteFill}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0, y: 1 }}
-                    />
-                    {/* Layer B gradient (top, animates opacity) */}
-                    <Animated.View style={[StyleSheet.absoluteFill, { opacity: layerBOpacity }]}>
-                        <LinearGradient
-                            colors={layerBGradient}
-                            style={StyleSheet.absoluteFill}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 0, y: 1 }}
-                        />
-                    </Animated.View>
-                </>
-            ) : (
-                <LinearGradient
-                    colors={
-                        backgroundType === 'blurred'
-                            ? ['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']
-                            : [`${safeThemeColor}15`, 'rgba(0,0,0,0.95)']
-                    }
-                    style={StyleSheet.absoluteFill}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                />
-            )}
+            {/* Gradient Overlay for legibility */}
+            <LinearGradient
+                colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.85)']}
+                style={StyleSheet.absoluteFill}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                pointerEvents="none"
+            />
+
+            {/* Film grain texture overlay */}
+            <GrainOverlay opacity={0.35} />
 
             {/* Dark overlay when lyrics are visible to improve text contrast against bright artwork */}
-            {isLyricsVisible && (
+            {!!isLyricsVisible && (
                 <View
                     style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.65)' }]}
                     pointerEvents="none"
@@ -764,16 +690,11 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
             )}
 
             {/* Content wrapped in SafeAreaView */}
-            <SafeAreaView style={styles.content} edges={['top', 'bottom']}>
+            <SafeAreaView style={styles.content} edges={['top', 'bottom', 'left', 'right']}>
                 {/* Header - only show in portrait */}
                 {!isLandscape && (
                     <View style={styles.header}>
-                        <IconButton
-                            icon="chevron-down"
-                            iconColor={playerColors.iconColor}
-                            size={32}
-                            onPress={handleClosePlayer}
-                        />
+                        <View style={{ width: 48 }} /> {/* Replaced chevron with spacer for symmetry since swipe dismisses */}
                         <Text variant="titleMedium" style={{ color: playerColors.textColor, fontWeight: 'bold' }}>
                             {isLyricsVisible ? 'Lyrics' : 'Now Playing'}
                         </Text>
@@ -802,19 +723,14 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                         </View>
 
                         {/* RIGHT COLUMN: Controls Layout */}
-                        <View style={{ flex: 0.55, justifyContent: 'space-between', paddingLeft: 8, paddingVertical: 16 }}>
-                            {/* Progress at TOP */}
-                            <ProgressControl
-                                activeColor={playerColors.activeColor}
-                                inactiveColor={playerColors.secondaryTextColor}
-                                textColor={playerColors.secondaryTextColor}
-                            />
-
+                        <View style={{ flex: 0.55, justifyContent: 'center', paddingLeft: 16 }}>
                             {/* Track Info - centered */}
-                            <View style={{ alignItems: 'center', marginVertical: 8 }}>
-                                <Text variant="headlineSmall" style={{ color: playerColors.textColor, fontWeight: 'bold', textAlign: 'center' }} numberOfLines={1}>
-                                    {currentTrack.name}
-                                </Text>
+                            <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                                <MarqueeText
+                                    text={currentTrack.name}
+                                    variant="headlineSmall"
+                                    style={{ color: playerColors.textColor, fontWeight: 'bold', textAlign: 'center' }}
+                                />
                                 <TouchableOpacity onPress={handleArtistPress}>
                                     <Text variant="bodyMedium" style={{ color: playerColors.secondaryTextColor, textAlign: 'center' }} numberOfLines={1}>
                                         {currentTrack.artist}
@@ -822,63 +738,64 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
                                 </TouchableOpacity>
                             </View>
 
+                            {/* Progress in the MIDDLE of controls */}
+                            <View style={{ marginVertical: 10 }}>
+                                <ProgressControl
+                                    activeColor={playerColors.activeColor}
+                                    inactiveColor={playerColors.secondaryTextColor}
+                                    textColor={playerColors.secondaryTextColor}
+                                />
+                            </View>
+
                             {/* Main Controls - evenly spaced */}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-evenly', paddingHorizontal: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-evenly', marginVertical: 10 }}>
                                 <IconButton
                                     icon={repeatMode === 'one' ? "repeat-once" : "repeat"}
                                     iconColor={repeatMode !== 'off' ? playerColors.activeColor : playerColors.secondaryTextColor}
-                                    size={24}
+                                    size={22}
                                     onPress={handleToggleRepeat}
-                                    accessibilityLabel={repeatMode === 'one' ? "Repeat One" : repeatMode === 'all' ? "Repeat All" : "Repeat Off"}
                                 />
                                 <IconButton
                                     icon="skip-previous"
-                                    iconColor={(backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.iconColor)}
-                                    size={32}
+                                    iconColor={playerColors.activeColor}
+                                    size={36}
                                     onPress={playPrevious}
-                                    accessibilityLabel="Previous Track"
                                 />
-                                <Surface style={[styles.playButton, { width: 56, height: 56, backgroundColor: (backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.textColor) }]} elevation={0}>
+                                <Surface style={[styles.playButton, { width: 60, height: 60, borderRadius: 30, backgroundColor: playerColors.activeColor }]} elevation={4}>
                                     {isBuffering ? (
-                                        <ActivityIndicator color={getContrastingIconColor((backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.textColor))} />
+                                        <ActivityIndicator color={getContrastingIconColor(playerColors.activeColor)} />
                                     ) : (
                                         <IconButton
                                             icon={isPlaying ? "pause" : "play"}
-                                            iconColor={getContrastingIconColor((backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.textColor))}
-                                            size={32}
+                                            iconColor={getContrastingIconColor(playerColors.activeColor)}
+                                            size={36}
                                             onPress={togglePlayPause}
                                             style={{ margin: 0 }}
-                                            accessibilityLabel={isPlaying ? "Pause" : "Play"}
                                         />
                                     )}
                                 </Surface>
                                 <IconButton
                                     icon="skip-next"
-                                    iconColor={(backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.iconColor)}
-                                    size={32}
+                                    iconColor={playerColors.activeColor}
+                                    size={36}
                                     onPress={playNext}
-                                    accessibilityLabel="Next Track"
                                 />
                                 <IconButton
                                     icon="shuffle"
                                     iconColor={shuffleMode ? playerColors.activeColor : playerColors.secondaryTextColor}
-                                    size={24}
+                                    size={22}
                                     onPress={toggleShuffle}
                                 />
                             </View>
 
-                            {/* Down Arrow to close */}
-                            <View style={{ alignItems: 'center', marginTop: 8 }}>
+                            {/* Bottom Actions */}
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, marginTop: 10 }}>
                                 <IconButton
                                     icon="chevron-down"
                                     iconColor={playerColors.secondaryTextColor}
-                                    size={28}
-                                    onPress={() => navigation.goBack()}
+                                    size={24}
+                                    onPress={handleClosePlayer}
                                 />
-                            </View>
-
-                            {/* Bottom Actions */}
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', paddingHorizontal: 16 }}>
                                 {/* Playback Speed Button */}
                                 <IconButton
                                     icon="speedometer"
@@ -941,16 +858,18 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
                                     <View style={styles.trackInfo}>
                                         <View style={{ flex: 1 }}>
-                                            <Text variant="headlineSmall" style={{ color: playerColors.textColor, fontWeight: 'bold' }} numberOfLines={1}>
-                                                {currentTrack.name}
-                                            </Text>
+                                            <MarqueeText
+                                                text={currentTrack.name}
+                                                variant="headlineSmall"
+                                                style={{ color: playerColors.textColor, fontWeight: 'bold' }}
+                                            />
                                             <TouchableOpacity onPress={handleArtistPress}>
                                                 <Text variant="bodyMedium" style={{ color: playerColors.secondaryTextColor }}>
                                                     {currentTrack.artist}
                                                 </Text>
                                             </TouchableOpacity>
 
-                                            {showTechnicalDetails && (() => {
+                                            {!!showTechnicalDetails && (() => {
                                                 // Determine effective display values based on audio quality
                                                 const isAutoMode = audioQuality === 'auto' && !isLocalTrack;
                                                 const isTranscoding = (audioQuality !== 'lossless' && audioQuality !== 'auto') && !isLocalTrack;
@@ -977,28 +896,28 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
 
                                                 return (
                                                     <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                                                        {isAutoMode && (
+                                                        {!!isAutoMode && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(100,200,100,0.2)' }}>
                                                                 <Text variant="labelSmall" style={{ color: playerColors.activeColor, fontSize: 10 }}>
                                                                     AUTO
                                                                 </Text>
                                                             </View>
                                                         )}
-                                                        {displayCodec && (
+                                                        {!!displayCodec && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
                                                                 <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 10 }}>
                                                                     {displayCodec}
                                                                 </Text>
                                                             </View>
                                                         )}
-                                                        {displayBitrate && (
+                                                        {!!displayBitrate && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
                                                                 <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 10 }}>
                                                                     {`${displayBitrate} kbps`}
                                                                 </Text>
                                                             </View>
                                                         )}
-                                                        {displayContainer && displayContainer !== currentTrack.codec && (
+                                                        {!!displayContainer && displayContainer !== currentTrack.codec && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
                                                                 <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 10 }}>
                                                                     {displayContainer.toUpperCase()}
@@ -1414,6 +1333,9 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#1a1a1a',
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        overflow: 'hidden',
     },
     content: {
         flex: 1,

@@ -7,9 +7,10 @@ import { RootStackParamList } from '../types/navigation';
 import { jellyfinApi } from '../api/jellyfin';
 import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Text, Button, List, IconButton, useTheme, Surface, Portal, Dialog, TouchableRipple, Avatar, TextInput } from 'react-native-paper';
+import { Text, Button, List, IconButton, useTheme, Surface, Portal, Dialog, TouchableRipple, Avatar, TextInput, Menu } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import { Loader } from '../components/Loader';
@@ -21,6 +22,9 @@ import { SongItem } from '../components/SongItem';
 import { dialogStyles } from '../utils/dialogStyles';
 import ActionSheet from '../components/ActionSheet';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import ImageColors from 'react-native-image-colors';
+import { lightenHexColor } from '../utils/colorUtils';
+
 
 import { HomeStackParamList } from '../types/navigation';
 
@@ -47,23 +51,84 @@ export default function DetailScreen() {
     const [tracksLoading, setTracksLoading] = useState(true); // New state for list loading
     const [refreshing, setRefreshing] = useState(false);
 
+    // SIMPLE IN-MEMORY CACHE FOR DETAIL SCREENS
+    // Key: itemId, Value: { item, tracks, artistAlbums, similarArtists, timestamp }
+    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    const getCachedData = (id: string) => {
+        const cached = (global as any).detailCache?.[id];
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+            return cached;
+        }
+        return null;
+    };
+
+    const setCachedData = (id: string, data: any) => {
+        if (!(global as any).detailCache) (global as any).detailCache = {};
+        (global as any).detailCache[id] = { ...data, timestamp: Date.now() };
+    };
+
+    const clearCachedData = (id: string) => {
+        if ((global as any).detailCache) delete (global as any).detailCache[id];
+    };
+
     // Artist specific states
     const [artistAlbums, setArtistAlbums] = useState<any[]>([]);
     const [similarArtists, setSimilarArtists] = useState<any[]>([]);
     const [isBioExpanded, setIsBioExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
-    const filteredTracks = useMemo(() => {
-        if (!searchQuery.trim()) return tracks;
-        const q = searchQuery.toLowerCase();
-        return tracks.filter(t =>
-            t.Name?.toLowerCase().includes(q) ||
-            t.AlbumArtist?.toLowerCase().includes(q) ||
-            t.Artists?.[0]?.toLowerCase().includes(q)
-        );
-    }, [tracks, searchQuery]);
+    // Glow and Sort states
+    const [glowColor, setGlowColor] = useState<string | null>(null);
+    const [sortBy, setSortBy] = useState<'default' | 'name' | 'artist' | 'album' | 'duration'>('default');
+    const [isSortMenuVisible, setIsSortMenuVisible] = useState(false);
+    const [fadeAnim] = useState(new Animated.Value(0));
+    const [slideAnim] = useState(new Animated.Value(20));
 
-    const { playTrack, setQueue, currentTrack, isPlaying, addToQueueNext, addToQueueEnd } = usePlayerStore();
+    const filteredTracks = useMemo(() => {
+        let result = [...tracks];
+        
+        // Apply search filter
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(t =>
+                t.Name?.toLowerCase().includes(q) ||
+                t.AlbumArtist?.toLowerCase().includes(q) ||
+                t.Artists?.[0]?.toLowerCase().includes(q)
+            );
+        }
+
+        // Apply sorting
+        if (sortBy !== 'default') {
+            result.sort((a, b) => {
+                switch (sortBy) {
+                    case 'name':
+                        return (a.Name || '').localeCompare(b.Name || '');
+                    case 'artist':
+                        const artistA = a.AlbumArtist || a.Artists?.[0] || '';
+                        const artistB = b.AlbumArtist || b.Artists?.[0] || '';
+                        return artistA.localeCompare(artistB);
+                    case 'album':
+                        return (a.Album || '').localeCompare(b.Album || '');
+                    case 'duration':
+                        return (a.RunTimeTicks || 0) - (b.RunTimeTicks || 0);
+                    default:
+                        return 0;
+                }
+            });
+        }
+
+        return result;
+    }, [tracks, searchQuery, sortBy]);
+
+
+    const { playTrack, setQueue, currentTrack, isPlaying, addToQueueNext, addToQueueEnd } = usePlayerStore(useShallow(state => ({
+        playTrack: state.playTrack,
+        setQueue: state.setQueue,
+        currentTrack: state.currentTrack,
+        isPlaying: state.isPlaying,
+        addToQueueNext: state.addToQueueNext,
+        addToQueueEnd: state.addToQueueEnd
+    })));
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
     const localLibrary = useLocalLibraryStore();
@@ -84,6 +149,20 @@ export default function DetailScreen() {
     const [isDeleteConfirmVisible, setIsDeleteConfirmVisible] = useState(false);
     const [isTrackOptionsVisible, setIsTrackOptionsVisible] = useState(false);
     const [isDownloadConfirmVisible, setIsDownloadConfirmVisible] = useState(false);
+
+    // Pagination State
+    const [startIndex, setStartIndex] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
+    const [isFetchingMore, setIsFetchingMore] = useState(false);
+    const PAGE_LIMIT = 100;
+
+    const loadMoreTracks = React.useCallback(() => {
+        if (!hasMore || isFetchingMore || loading || tracksLoading || dataSource === 'local') return;
+        setIsFetchingMore(true);
+        const nextIndex = startIndex + PAGE_LIMIT;
+        setStartIndex(nextIndex);
+        fetchDetails(false, nextIndex).finally(() => setIsFetchingMore(false));
+    }, [hasMore, isFetchingMore, loading, tracksLoading, dataSource, startIndex]);
 
     // Multi-select mode state
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -126,6 +205,9 @@ export default function DetailScreen() {
 
     const onRefresh = React.useCallback(async () => {
         setRefreshing(true);
+        setStartIndex(0);
+        setHasMore(true);
+        clearCachedData(itemId); // Clear cache on manual refresh
         if (dataSource === 'local') {
             await localLibrary.refreshLibrary(true);
             setTracks(localLibrary.getFilteredTracks().map(t => ({
@@ -143,10 +225,10 @@ export default function DetailScreen() {
                 isFavorite: t.isFavorite
             })));
         } else {
-            await fetchDetails();
+            await fetchDetails(true);
         }
         setRefreshing(false);
-    }, [dataSource, fetchDetails, localLibrary]);
+    }, [dataSource, fetchDetails, localLibrary, itemId]);
 
     const handleDeleteSelected = async () => {
         setIsSelectionMenuVisible(false);
@@ -233,7 +315,17 @@ export default function DetailScreen() {
 
 
 
+    const getPlaylistRandomColor = () => {
+        const vibrantColors = [
+            '#FF4D4D', '#FF9E4D', '#FFD74D', '#4DFF88', 
+            '#4DFFFF', '#4D88FF', '#9E4DFF', '#FF4DFF',
+            '#FF4D88', '#4DFFD7'
+        ];
+        return vibrantColors[Math.floor(Math.random() * vibrantColors.length)];
+    };
+
     const formatDuration = (ticks: number) => {
+
         const minutes = Math.floor(ticks / 600000000);
         const hours = Math.floor(minutes / 60);
         const remainingMinutes = minutes % 60;
@@ -252,158 +344,149 @@ export default function DetailScreen() {
         return () => interactionPromise.cancel();
     }, [itemId, dataSource, localLibrary.tracks, localLibrary.selectedFolderPaths]); // Re-fetch when tracks are enriched or folder selection changes
 
-    async function fetchDetails() {
+    async function fetchDetails(isManualRefresh = false, currentStartIndex = 0) {
+        let finalItem = null;
+        let finalTracks = [];
+        let finalArtistAlbums = [];
+        let finalSimilarArtists = [];
+
+        // Check cache first
+        if (!isManualRefresh && currentStartIndex === 0) {
+            const cached = getCachedData(itemId);
+            if (cached) {
+                setItem(cached.item);
+                setTracks(cached.tracks);
+                setArtistAlbums(cached.artistAlbums);
+                setSimilarArtists(cached.similarArtists);
+                setLoading(false);
+                setTracksLoading(false);
+                return;
+            }
+        }
+
         setTracksLoading(true);
-        if (!item) setLoading(true); // Only show full loader if we don't have item yet
+        if (!item) setLoading(true);
 
         try {
             // LOCAL MODE
             if (dataSource === 'local') {
-                let details = item; // Use existing if available
+                let details = item;
                 let localTracks: any[] = [];
 
                 if (itemId === 'all-songs') {
-                    // Details already set optimistically, but double check
                     if (!details) details = { Id: 'all-songs', Name: 'All Songs', Type: 'Playlist' };
-
-                    // FETCH FROM DATABASE with folder filtering for performance
                     try {
                         const { selectedFolderPaths, availableFolders } = localLibrary;
                         let dbTracks: any[] = [];
-
-                        // Use memory cache for instant load if available
                         const cachedTracks = localLibrary.getFilteredTracks();
                         if (cachedTracks.length > 0) {
                             dbTracks = cachedTracks;
                         } else {
-                            // If no folders scanned yet, get all; if folders selected, filter by them
                             if (availableFolders.length === 0) {
                                 dbTracks = await DatabaseService.getAllTracks();
                             } else if (selectedFolderPaths.length === 0) {
-                                dbTracks = []; // No folders selected = no tracks
+                                dbTracks = [];
                             } else {
                                 dbTracks = await DatabaseService.getTracksByFolders(selectedFolderPaths);
                             }
                         }
-
                         localTracks = dbTracks.map(t => ({
-                            Id: t.id,
-                            Name: t.name,
-                            AlbumArtist: t.artist,
-                            Album: t.album,
-                            ImageUrl: t.imageUrl,
-                            RunTimeTicks: t.durationMillis * 10000,
-                            streamUrl: t.streamUrl,
-                            bitrate: t.bitrate,
-                            codec: t.codec,
-                            container: t.container,
-                            lyrics: t.lyrics,
-                            isFavorite: t.isFavorite
+                            Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                            ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                            streamUrl: t.streamUrl, bitrate: t.bitrate, codec: t.codec,
+                            container: t.container, lyrics: t.lyrics, isFavorite: t.isFavorite
                         }));
                     } catch (dbError) {
-                        console.error("SQLite fetch failed, falling back to store:", dbError);
-                        // Fallback to store if DB fails
                         localTracks = localLibrary.getFilteredTracks().map(t => ({
-                            Id: t.id,
-                            Name: t.name,
-                            AlbumArtist: t.artist,
-                            Album: t.album,
-                            ImageUrl: t.imageUrl,
-                            RunTimeTicks: t.durationMillis * 10000,
-                            streamUrl: t.streamUrl,
-                            bitrate: t.bitrate,
-                            codec: t.codec,
-                            container: t.container,
-                            lyrics: t.lyrics,
-                            isFavorite: t.isFavorite
+                            Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                            ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                            streamUrl: t.streamUrl, bitrate: t.bitrate, codec: t.codec,
+                            container: t.container, lyrics: t.lyrics, isFavorite: t.isFavorite
                         }));
                     }
                 } else if (itemId === 'liked-songs') {
                     if (!details) details = { Id: 'liked-songs', Name: 'Liked Songs', Type: 'Playlist' };
-                    // For liked songs, we can also use DB if we add a getFeatured method, but for now filtering store is fine or use DB
-                    // Let's use DB for consistency if possible, but DatabaseService needs a getFavorites method.
-                    // For now, stick to localLibrary since it's already sync'd or add getFavorites to DB service later.
-                    // Actually, let's use localLibrary for now to be safe as I haven't implemented getFavorites in DB service explicitly in this file context yet
-                    // Wait, I did verify DatabaseService has toggleFavorite, but maybe not getFavorites?
-                    // Let's safe fallback to localLibrary for liked-songs for now.
                     localTracks = localLibrary.getFavoriteTracks().map(t => ({
-                        Id: t.id,
-                        Name: t.name,
-                        AlbumArtist: t.artist,
-                        Album: t.album,
-                        ImageUrl: t.imageUrl,
-                        RunTimeTicks: t.durationMillis * 10000,
-                        streamUrl: t.streamUrl,
-                        bitrate: t.bitrate,
-                        codec: t.codec,
-                        container: t.container,
-                        lyrics: t.lyrics,
-                        isFavorite: true
+                        Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                        ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                        streamUrl: t.streamUrl, bitrate: t.bitrate, codec: t.codec,
+                        container: t.container, lyrics: t.lyrics, isFavorite: true
                     }));
                 } else if (type === 'MusicArtist') {
-                    // Local artist - fetch tracks by artistId from DB
                     const dbTracks = await DatabaseService.getTracksByArtist(itemId);
-                    const artistName = dbTracks[0]?.artist || 'Unknown Artist';
+                    const artistName = dbTracks[0]?.artist || itemId || 'Unknown Artist';
                     details = { Id: itemId, Name: artistName, Type: 'MusicArtist' };
                     localTracks = dbTracks.map(t => ({
-                        Id: t.id,
-                        Name: t.name,
-                        AlbumArtist: t.artist,
-                        Album: t.album,
-                        ImageUrl: t.imageUrl,
-                        RunTimeTicks: t.durationMillis * 10000,
-                        streamUrl: t.streamUrl,
-                        bitrate: t.bitrate,
-                        codec: t.codec,
-                        container: t.container,
-                        lyrics: t.lyrics,
-                        isFavorite: t.isFavorite
+                        Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                        ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                        streamUrl: t.streamUrl, bitrate: t.bitrate, codec: t.codec,
+                        container: t.container, lyrics: t.lyrics, isFavorite: t.isFavorite
                     }));
+                    try {
+                        const dbAlbums = await DatabaseService.getAlbumsByArtist(itemId);
+                        finalArtistAlbums = dbAlbums;
+                    } catch (albumError) {}
                 } else if (type === 'MusicAlbum') {
-                    // Local album - fetch tracks by album name from DB
-                    // itemId might be album name if I set it that way in LibraryScreen.
-                    // LibraryScreen sets Id: a.name (album name).
                     const dbTracks = await DatabaseService.getTracksByAlbum(itemId);
                     const albumName = dbTracks[0]?.album || 'Unknown Album';
                     const artistName = dbTracks[0]?.artist || 'Unknown Artist';
                     details = { Id: itemId, Name: albumName, Type: 'MusicAlbum', AlbumArtist: artistName };
                     localTracks = dbTracks.map(t => ({
-                        Id: t.id,
-                        Name: t.name,
-                        AlbumArtist: t.artist,
-                        Album: t.album,
-                        ImageUrl: t.imageUrl,
-                        RunTimeTicks: t.durationMillis * 10000,
-                        streamUrl: t.streamUrl,
-                        bitrate: t.bitrate,
-                        codec: t.codec,
-                        container: t.container,
-                        lyrics: t.lyrics,
-                        isFavorite: t.isFavorite
+                        Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                        ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                        streamUrl: t.streamUrl, bitrate: t.bitrate, codec: t.codec,
+                        container: t.container, lyrics: t.lyrics, isFavorite: t.isFavorite
                     }));
                 } else if (type === 'Playlist') {
-                    // Local playlist
                     const playlist = localLibrary.playlists.find(p => p.id === itemId);
                     if (playlist) {
                         details = { Id: playlist.id, Name: playlist.name, Type: 'Playlist', isLocal: true };
                         localTracks = localLibrary.getPlaylistTracks(itemId).map(t => ({
-                            Id: t.id,
-                            Name: t.name,
-                            AlbumArtist: t.artist,
-                            Album: t.album,
-                            ImageUrl: t.imageUrl,
-                            RunTimeTicks: t.durationMillis * 10000,
-                            streamUrl: t.streamUrl,
-                            PlaylistItemId: t.id, // For remove functionality
-                            bitrate: t.bitrate,
-                            codec: t.codec,
-                            container: t.container,
-                            lyrics: t.lyrics,
-                            isFavorite: t.isFavorite
+                            Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                            ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                            streamUrl: t.streamUrl, PlaylistItemId: t.id, bitrate: t.bitrate,
+                            codec: t.codec, container: t.container, lyrics: t.lyrics, isFavorite: t.isFavorite
                         }));
                     }
-                }
+                } else if (type === 'MusicGenre') {
+                    const dbTracks = await DatabaseService.getAllTracks();
+                    // 1. Find all artists who have at least one song in this genre
+                    const artistsInGenre = Array.from(new Set(
+                        dbTracks.filter(t => t.genre === itemId).map(t => t.artist).filter(Boolean)
+                    ));
 
+                    // 2. Get all tracks from these artists
+                    const artistTracks = dbTracks.filter(t => artistsInGenre.includes(t.artist));
+                    localTracks = artistTracks.map(t => ({
+                        Id: t.id, Name: t.name, AlbumArtist: t.artist, Album: t.album,
+                        ImageUrl: t.imageUrl, RunTimeTicks: t.durationMillis * 10000,
+                        streamUrl: t.streamUrl, bitrate: t.bitrate, codec: t.codec,
+                        container: t.container, lyrics: t.lyrics, isFavorite: t.isFavorite
+                    }));
+                    details = { Id: itemId, Name: itemId, Type: 'MusicGenre' };
+
+                    // 3. Get unique albums from these artists
+                    const albumMap = new Map();
+                    artistTracks.forEach(t => {
+                        if (t.album && !albumMap.has(t.album)) {
+                            albumMap.set(t.album, { Id: t.album, Name: t.album, Type: 'MusicAlbum', ImageUrl: t.imageUrl });
+                        }
+                    });
+                    finalArtistAlbums = Array.from(albumMap.values());
+                    setArtistAlbums(finalArtistAlbums);
+
+                    // 4. Get unique artists
+                    const artistMap = new Map();
+                    artistTracks.forEach(t => {
+                        if (t.artist && !artistMap.has(t.artist)) {
+                            artistMap.set(t.artist, { Id: t.artist, Name: t.artist, Type: 'MusicArtist', ImageUrl: t.imageUrl });
+                        }
+                    });
+                    finalSimilarArtists = Array.from(artistMap.values());
+                    setSimilarArtists(finalSimilarArtists);
+                }
+                finalItem = details;
+                finalTracks = localTracks;
                 setItem(details);
                 setTracks(localTracks);
             } else {
@@ -411,73 +494,108 @@ export default function DetailScreen() {
                 let details = item;
                 if (!details) {
                     if (itemId === 'all-songs') {
-                        details = { Id: 'all-songs', Name: 'All Songs', Type: 'Playlist', ProductionYear: undefined };
+                        details = { Id: 'all-songs', Name: 'All Songs', Type: 'Playlist' };
                     } else if (itemId === 'liked-songs') {
-                        details = { Id: 'liked-songs', Name: 'Liked Songs', Type: 'Playlist', ProductionYear: undefined };
+                        details = { Id: 'liked-songs', Name: 'Liked Songs', Type: 'Playlist' };
                     } else {
                         details = await jellyfinApi.getItem(itemId);
                     }
                 }
+                finalItem = details;
                 setItem(details);
 
                 let itemsData;
                 if (itemId === 'all-songs') {
-                    itemsData = await jellyfinApi.getItems({
-                        IncludeItemTypes: 'Audio',
-                        Recursive: true,
-                        SortBy: 'SortName',
-                    });
+                    itemsData = await jellyfinApi.getItems({ IncludeItemTypes: 'Audio', Recursive: true, SortBy: 'SortName', Limit: PAGE_LIMIT, StartIndex: currentStartIndex });
                 } else if (itemId === 'liked-songs') {
-                    itemsData = await jellyfinApi.getItems({
-                        IncludeItemTypes: 'Audio',
-                        Recursive: true,
-                        SortBy: 'SortName',
-                        Filters: 'IsFavorite',
-                    });
+                    itemsData = await jellyfinApi.getItems({ IncludeItemTypes: 'Audio', Recursive: true, SortBy: 'SortName', Filters: 'IsFavorite', Limit: PAGE_LIMIT, StartIndex: currentStartIndex });
                 } else if (type === 'MusicArtist') {
-                    // Fetch top tracks
-                    itemsData = await jellyfinApi.getItems({
-                        ArtistIds: itemId,
-                        IncludeItemTypes: 'Audio',
-                        Recursive: true,
-                        SortBy: 'PlayCount',
-                        SortOrder: 'Descending',
-                        Limit: 10
-                    });
-
-                    // Fetch albums
+                    itemsData = await jellyfinApi.getItems({ ArtistIds: itemId, IncludeItemTypes: 'Audio', Recursive: true, SortBy: 'PlayCount', SortOrder: 'Descending', Limit: 10 });
                     try {
-                        const albumsRes = await jellyfinApi.getItems({
-                            ArtistIds: itemId,
-                            IncludeItemTypes: 'MusicAlbum',
-                            Recursive: true,
-                            SortBy: 'ProductionYear,SortName',
-                            SortOrder: 'Descending'
-                        });
-                        setArtistAlbums(albumsRes.Items || []);
-                    } catch (e) {
-                        console.warn("Failed to fetch artist albums", e);
-                    }
-
-                    // Fetch similar artists
+                        const albumsRes = await jellyfinApi.getItems({ ArtistIds: itemId, IncludeItemTypes: 'MusicAlbum', Recursive: true, SortBy: 'ProductionYear,SortName', SortOrder: 'Descending' });
+                        finalArtistAlbums = albumsRes.Items || [];
+                        setArtistAlbums(finalArtistAlbums);
+                    } catch (e) {}
                     try {
                         const similarRes = await jellyfinApi.getSimilarItems(itemId);
-                        setSimilarArtists(similarRes.Items || []);
-                    } catch (e) {
-                        console.warn("Failed to fetch similar artists", e);
-                    }
+                        finalSimilarArtists = similarRes.Items || [];
+                        setSimilarArtists(finalSimilarArtists);
+                    } catch (e) {}
                 } else if (type === 'Playlist') {
                     itemsData = await jellyfinApi.getPlaylistItems(itemId);
-                } else {
-                    itemsData = await jellyfinApi.getItems({
-                        ParentId: itemId,
-                        IncludeItemTypes: ['Audio'],
-                        Recursive: true,
-                        SortBy: 'ParentIndexNumber,IndexNumber',
+                } else if (type === 'MusicGenre') {
+                    // First, fetch artists that belong to this genre
+                    const artistsRes = await jellyfinApi.getItems({ 
+                        GenreIds: itemId, 
+                        IncludeItemTypes: 'MusicArtist', 
+                        Recursive: true, 
+                        SortBy: 'SortName' 
                     });
+                    const artists = artistsRes.Items || [];
+                    finalSimilarArtists = artists;
+                    setSimilarArtists(artists);
+
+                    if (artists.length > 0) {
+                        const artistIds = artists.map(a => a.Id).join(',');
+                        
+                        // Fetch albums by these artists
+                        try {
+                            const albumsRes = await jellyfinApi.getItems({ 
+                                ArtistIds: artistIds, 
+                                IncludeItemTypes: 'MusicAlbum', 
+                                Recursive: true, 
+                                SortBy: 'ProductionYear,SortName', 
+                                SortOrder: 'Descending' 
+                            });
+                            finalArtistAlbums = albumsRes.Items || [];
+                            setArtistAlbums(finalArtistAlbums);
+                        } catch (e) {
+                            console.warn("Failed to fetch genre albums via artists", e);
+                        }
+
+                        // Fetch songs by these artists
+                        try {
+                            itemsData = await jellyfinApi.getItems({ 
+                                ArtistIds: artistIds, 
+                                IncludeItemTypes: 'Audio', 
+                                Recursive: true, 
+                                SortBy: 'SortName',
+                                Limit: PAGE_LIMIT,
+                                StartIndex: currentStartIndex
+                            });
+                        } catch (e) {
+                            console.warn("Failed to fetch genre songs via artists", e);
+                            itemsData = { Items: [] };
+                        }
+                    } else {
+                        // Fallback: If no artists found, try fetching items directly by genre (original behavior)
+                        itemsData = await jellyfinApi.getItems({ GenreIds: itemId, IncludeItemTypes: 'Audio', Recursive: true, SortBy: 'SortName', Limit: PAGE_LIMIT, StartIndex: currentStartIndex });
+                        try {
+                            const albumsRes = await jellyfinApi.getItems({ GenreIds: itemId, IncludeItemTypes: 'MusicAlbum', Recursive: true, SortBy: 'SortName' });
+                            finalArtistAlbums = albumsRes.Items || [];
+                            setArtistAlbums(finalArtistAlbums);
+                        } catch (e) {}
+                    }
+                } else {
+                    itemsData = await jellyfinApi.getItems({ ParentId: itemId, IncludeItemTypes: 'Audio', Recursive: true, SortBy: 'ParentIndexNumber,IndexNumber', Limit: PAGE_LIMIT, StartIndex: currentStartIndex });
                 }
-                setTracks(itemsData.Items);
+                
+                if (currentStartIndex > 0) {
+                    finalTracks = [...tracks, ...(itemsData.Items || [])];
+                    setTracks(prev => [...prev, ...(itemsData.Items || [])]);
+                } else {
+                    finalTracks = itemsData.Items || [];
+                    setTracks(itemsData.Items || []);
+                }
+                
+                // If itemsData doesn't have exactly PAGE_LIMIT, there are no more pages
+                setHasMore((itemsData.Items?.length || 0) === PAGE_LIMIT);
             }
+
+            if (currentStartIndex === 0) {
+                setCachedData(itemId, { item: finalItem, tracks: finalTracks, artistAlbums: finalArtistAlbums, similarArtists: finalSimilarArtists });
+            }
+
         } catch (error) {
             console.error('Failed to fetch details', error);
         } finally {
@@ -485,6 +603,58 @@ export default function DetailScreen() {
             setTracksLoading(false);
         }
     };
+
+    const applyGlowAndAnimation = async (data: { item: any, type: string }) => {
+        try {
+            let selectedColor = null;
+
+            if (data.type === 'MusicArtist' && data.item?.Id) {
+                const imgUrl = jellyfinApi.getImageUrl(data.item.Id);
+                const colors = await ImageColors.getColors(imgUrl, {
+                    fallback: theme.colors.primary,
+                    cache: true,
+                    key: data.item.Id,
+                });
+                if (colors.platform === 'android') {
+                    selectedColor = colors.vibrant || colors.dominant;
+                } else if (colors.platform === 'ios') {
+                    selectedColor = colors.primary || colors.background;
+                }
+            } else if (data.type === 'Playlist' || data.type === 'MusicGenre') {
+                selectedColor = getPlaylistRandomColor();
+            }
+
+            if (selectedColor) {
+                setGlowColor(lightenHexColor(selectedColor, 0.3));
+            }
+
+            // Animate
+            fadeAnim.setValue(0);
+            slideAnim.setValue(20);
+            Animated.parallel([
+                Animated.timing(fadeAnim, {
+                    toValue: 1,
+                    duration: 1000,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(slideAnim, {
+                    toValue: 0,
+                    duration: 1200,
+                    useNativeDriver: true,
+                }),
+            ]).start();
+        } catch (error) {
+            console.warn('Glow color extraction failed:', error);
+        }
+    };
+
+    useEffect(() => {
+        if (item && item.Id) {
+            applyGlowAndAnimation({ item, type });
+        }
+    }, [item]);
+
+
 
     const fetchPlaylists = async () => {
         try {
@@ -895,13 +1065,28 @@ export default function DetailScreen() {
                         {tracks.length} Top Tracks
                     </Text>
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24 }}>
-                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0, marginRight: 16 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, width: '100%', justifyContent: 'center', gap: 12 }}>
+                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
                         <ShuffleFab size={48} onPress={handleShufflePlay} />
+                        <IconButton
+                            icon="sort-variant"
+                            size={28}
+                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
+                            onPress={() => setIsSortMenuVisible(true)}
+                        />
+                        {dataSource !== 'local' && tracks.length > 0 ? (
+                            <IconButton 
+                                icon="download" 
+                                size={28} 
+                                style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }} 
+                                onPress={() => setIsDownloadConfirmVisible(true)} 
+                            />
+                        ) : null}
                     </View>
+
                 </View>
 
-                {item.Overview && (
+                {!!item.Overview && (
                     <Pressable style={{ paddingHorizontal: 20, marginBottom: 24 }} onPress={() => setIsBioExpanded(!isBioExpanded)}>
                         <Text variant="labelLarge" style={{ color: theme.colors.primary, marginBottom: 8 }}>ABOUT</Text>
                         <Text variant="bodyMedium" numberOfLines={isBioExpanded ? undefined : 3} style={{ color: theme.colors.onSurfaceVariant, lineHeight: 20 }}>
@@ -910,7 +1095,7 @@ export default function DetailScreen() {
                     </Pressable>
                 )}
 
-                {artistAlbums.length > 0 && (
+                {artistAlbums.length > 0 ? (
                     <View style={{ marginBottom: 24 }}>
                         <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Albums & EPs</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
@@ -923,9 +1108,9 @@ export default function DetailScreen() {
                             ))}
                         </ScrollView>
                     </View>
-                )}
+                ) : null}
 
-                {similarArtists.length > 0 && (
+                {similarArtists.length > 0 ? (
                     <View style={{ marginBottom: 24 }}>
                         <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Similar Artists</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
@@ -937,7 +1122,7 @@ export default function DetailScreen() {
                             ))}
                         </ScrollView>
                     </View>
-                )}
+                ) : null}
 
                 <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 8, fontWeight: 'bold' }}>Top Tracks</Text>
             </View>
@@ -973,7 +1158,7 @@ export default function DetailScreen() {
                 )}
                 <Text variant="headlineMedium" style={styles.title}>{item.Name}</Text>
 
-                {item.Overview && (
+                {!!item.Overview && (
                     <Text variant="bodyMedium" numberOfLines={3} style={{ color: theme.colors.onSurfaceVariant, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }}>
                         {item.Overview}
                     </Text>
@@ -991,15 +1176,25 @@ export default function DetailScreen() {
                     </Surface>
                 </View>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, paddingHorizontal: 20, width: '100%', justifyContent: 'space-between' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0, marginRight: 16 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
-                        <ShuffleFab size={48} onPress={handleShufflePlay} />
-                    </View>
-                    {dataSource !== 'local' && tracks.length > 0 && (
-                        <IconButton icon="download" size={28} style={{ backgroundColor: theme.colors.surfaceVariant }} onPress={() => setIsDownloadConfirmVisible(true)} />
-                    )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, paddingHorizontal: 20, width: '100%', justifyContent: 'center', gap: 12 }}>
+                    <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
+                    <ShuffleFab size={48} onPress={handleShufflePlay} />
+                    <IconButton
+                        icon="sort-variant"
+                        size={28}
+                        style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
+                        onPress={() => setIsSortMenuVisible(true)}
+                    />
+                    {dataSource !== 'local' && tracks.length > 0 ? (
+                        <IconButton 
+                            icon="download" 
+                            size={28} 
+                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }} 
+                            onPress={() => setIsDownloadConfirmVisible(true)} 
+                        />
+                    ) : null}
                 </View>
+
 
                 <View style={{ paddingHorizontal: 20, marginTop: 24, width: '100%', marginBottom: 8 }}>
                     <TextInput
@@ -1016,12 +1211,83 @@ export default function DetailScreen() {
         );
     };
 
+    const renderGenreHeader = () => {
+        return (
+            <View style={{ marginBottom: 24 }}>
+                <View style={[styles.header, { paddingTop: 20, marginBottom: 16 }]}>
+                    <Surface style={[styles.artwork, { borderRadius: 12, elevation: 4, backgroundColor: theme.colors.surfaceVariant }]} elevation={4}>
+                        <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                            <Avatar.Icon size={80} icon="music-box-outline" color={theme.colors.onSurfaceVariant} style={{ backgroundColor: 'transparent' }} />
+                        </View>
+                    </Surface>
+                    <Text variant="displaySmall" style={[styles.title, { fontWeight: '900' }]}>{item.Name}</Text>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+                        Genre • {tracks.length} Songs
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, width: '100%', justifyContent: 'center', gap: 12 }}>
+                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
+                        <ShuffleFab size={48} onPress={handleShufflePlay} />
+                        <IconButton
+                            icon="sort-variant"
+                            size={28}
+                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
+                            onPress={() => setIsSortMenuVisible(true)}
+                        />
+                        {dataSource !== 'local' && tracks.length > 0 ? (
+                            <IconButton 
+                                icon="download" 
+                                size={28} 
+                                style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }} 
+                                onPress={() => setIsDownloadConfirmVisible(true)} 
+                            />
+                        ) : null}
+                    </View>
+                </View>
+
+                {similarArtists.length > 0 ? (
+                    <View style={{ marginBottom: 24 }}>
+                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Artists in this Genre</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
+                            {similarArtists.map((artist) => (
+                                <Pressable key={artist.Id} style={{ width: 100, alignItems: 'center' }} onPress={() => (navigation as any).push('Detail', { itemId: artist.Id, type: 'MusicArtist' })}>
+                                    <Image source={{ uri: artist.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(artist.Id) : undefined) }} style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
+                                    <Text variant="bodySmall" numberOfLines={2} style={{ textAlign: 'center', fontWeight: 'bold' }}>{artist.Name}</Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </View>
+                ) : null}
+
+                {artistAlbums.length > 0 ? (
+                    <View style={{ marginBottom: 24 }}>
+                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Albums in this Genre</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
+                            {artistAlbums.map((album) => (
+                                <Pressable key={album.Id} style={{ width: 140 }} onPress={() => (navigation as any).navigate('Detail', { itemId: album.Id, type: 'MusicAlbum' })}>
+                                    <Image source={{ uri: album.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(album.Id) : undefined) }} style={{ width: 140, height: 140, borderRadius: 8, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
+                                    <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: 'bold' }}>{album.Name}</Text>
+                                    <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{album.ProductionYear || 'Album'}</Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </View>
+                ) : null}
+
+                <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 8, fontWeight: 'bold' }}>Songs</Text>
+            </View>
+        );
+    };
+
     const renderHeader = () => {
         if (item.Type === 'MusicArtist') {
             return renderArtistHeader();
         }
         if (item.Type === 'Playlist') {
             return renderPlaylistHeader();
+        }
+        if (item.Type === 'MusicGenre') {
+            return renderGenreHeader();
         }
         return (
             <View style={styles.header}>
@@ -1050,51 +1316,37 @@ export default function DetailScreen() {
                     {item.Type === 'MusicArtist' ? 'Artist' : item.ProductionYear || 'Playlist'} • {tracks.length} songs • {formatDuration(tracks.reduce((acc, t) => acc + (t.RunTimeTicks || 0), 0))}
                 </Text>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, width: '100%', justifyContent: 'center', gap: 12 }}>
                     <Button
                         mode="contained"
                         icon="play"
                         onPress={handlePlayAll}
-                        style={[styles.playButton, { marginTop: 0, marginRight: 16 }]}
+                        style={[styles.playButton, { marginTop: 0 }]}
                         contentStyle={{ paddingHorizontal: 16 }}
                     >
                         Play
                     </Button>
                     <ShuffleFab
                         size={48}
-                        onPress={() => {
-                            // Shuffle items and play
-                            if (tracks.length === 0) return;
-                            const isLocal = dataSource === 'local';
-                            const shuffledQueue = [...tracks].sort(() => Math.random() - 0.5).map(t => ({
-                                id: t.Id,
-                                name: t.Name,
-                                artist: t.AlbumArtist || t.Artists?.[0] || 'Unknown',
-                                album: t.Album || 'Unknown',
-                                imageUrl: t.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : ''),
-                                imageBlurHash: t.ImageBlurHashes?.Primary ? Object.values(t.ImageBlurHashes.Primary)[0] as string : undefined,
-                                durationMillis: t.RunTimeTicks ? t.RunTimeTicks / 10000 : 0,
-                                streamUrl: t.streamUrl || '',
-                                artistId: t.ArtistItems?.[0]?.Id || '',
-                                playlistId: item?.Type === 'Playlist' ? itemId : undefined,
-                                playlistItemId: t.PlaylistItemId,
-                                bitrate: isLocal ? t.bitrate : t.MediaSources?.[0]?.Bitrate,
-                                codec: isLocal ? t.codec : (t.MediaSources?.[0]?.Codec || t.MediaSources?.[0]?.MediaStreams?.find((s: any) => s.Type === 'Audio')?.Codec),
-                                lyrics: isLocal ? t.lyrics : undefined,
-                            }));
-                            setQueue(shuffledQueue);
-                            playTrack(shuffledQueue[0]);
-                        }}
+                        onPress={handleShufflePlay}
                     />
-                    {dataSource !== 'local' && tracks.length > 0 && (
+                    <IconButton
+                        icon="sort-variant"
+                        size={28}
+                        style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
+                        onPress={() => setIsSortMenuVisible(true)}
+                    />
+
+                    {dataSource !== 'local' && tracks.length > 0 ? (
                         <IconButton
                             icon="download"
                             size={28}
-                            style={{ marginLeft: 8, backgroundColor: theme.colors.surfaceVariant }}
+                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
                             onPress={() => setIsDownloadConfirmVisible(true)}
                         />
-                    )}
+                    ) : null}
                 </View>
+
             </View>
         );
     };
@@ -1102,30 +1354,47 @@ export default function DetailScreen() {
     const isArtist = item?.Type === 'MusicArtist';
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-            {!isArtist && (
-                <View style={[styles.appBar, isSelectionMode && { backgroundColor: theme.colors.surface, elevation: 4 }]}>
-                    {isSelectionMode ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'space-between' }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <IconButton icon="close" onPress={exitSelectionMode} />
-                                <Text variant="titleMedium" style={{ marginLeft: 8 }}>
-                                    {selectedTracks.size} selected
-                                </Text>
-                            </View>
-                            <View style={{ flexDirection: 'row' }}>
-                                <IconButton icon="download" onPress={handleDownloadSelected} />
-                                <IconButton icon="playlist-plus" onPress={handleAddSelectedToPlaylist} />
-                                {dataSource === 'local' && (
-                                    <IconButton icon="delete" onPress={handleDeleteSelected} />
-                                )}
-                            </View>
-                        </View>
-                    ) : (
-                        <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
-                    )}
-                </View>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            {glowColor && (
+                <Animated.View
+                    style={{
+                        position: 'absolute',
+                        top: -100,
+                        left: -100,
+                        right: -100,
+                        height: 400,
+                        opacity: fadeAnim,
+                        transform: [{ translateY: slideAnim }],
+                    }}
+                >
+                    <LinearGradient
+                        colors={[`${glowColor}40`, 'transparent']}
+                        style={{ flex: 1 }}
+                    />
+                </Animated.View>
             )}
+
+            <View style={[styles.appBar, { paddingTop: insets.top }, isSelectionMode && { backgroundColor: theme.colors.surface, elevation: 4 }, isArtist && !isSelectionMode && { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, backgroundColor: 'transparent' }]}>
+                {isSelectionMode ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'space-between' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <IconButton icon="close" onPress={exitSelectionMode} />
+                            <Text variant="titleMedium" style={{ marginLeft: 8 }}>
+                                {selectedTracks.size} selected
+                            </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row' }}>
+                            <IconButton icon="download" onPress={handleDownloadSelected} />
+                            <IconButton icon="playlist-plus" onPress={handleAddSelectedToPlaylist} />
+                            {dataSource === 'local' && (
+                                <IconButton icon="delete" onPress={handleDeleteSelected} />
+                            )}
+                        </View>
+                    </View>
+                ) : (
+                    <IconButton icon="arrow-left" onPress={() => navigation.goBack()} style={{ backgroundColor: isArtist ? 'rgba(0,0,0,0.3)' : 'transparent' }} iconColor={isArtist ? '#fff' : undefined} />
+                )}
+            </View>
 
             <DraggableFlatList
                 data={filteredTracks}
@@ -1155,6 +1424,9 @@ export default function DetailScreen() {
                     }
                 }}
                 activationDistance={20}
+                onEndReached={loadMoreTracks}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginVertical: 16 }} /> : null}
             />
 
             <ActionSheet visible={isAddToPlaylistVisible} onClose={() => !isAddingToPlaylist && setIsAddToPlaylistVisible(false)} title="Add to Playlist" scrollable>
@@ -1285,6 +1557,48 @@ export default function DetailScreen() {
                     </View>
                 </View>
             </ActionSheet>
+
+            {/* Sort Options ActionSheet */}
+            <ActionSheet visible={isSortMenuVisible} onClose={() => setIsSortMenuVisible(false)} title="Sort Options">
+                <View style={{ gap: 4 }}>
+                    <List.Item
+                        title="Default"
+                        description="Original playlist order"
+                        left={props => <List.Icon {...props} icon="sort-variant" />}
+                        right={props => sortBy === 'default' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
+                        onPress={() => { setSortBy('default'); setIsSortMenuVisible(false); }}
+                    />
+                    <List.Item
+                        title="Name (A-Z)"
+                        description="Sort alphabetically by track name"
+                        left={props => <List.Icon {...props} icon="alphabetical" />}
+                        right={props => sortBy === 'name' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
+                        onPress={() => { setSortBy('name'); setIsSortMenuVisible(false); }}
+                    />
+                    <List.Item
+                        title="Artist"
+                        description="Sort by artist name"
+                        left={props => <List.Icon {...props} icon="account-music" />}
+                        right={props => sortBy === 'artist' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
+                        onPress={() => { setSortBy('artist'); setIsSortMenuVisible(false); }}
+                    />
+                    <List.Item
+                        title="Album"
+                        description="Group by album"
+                        left={props => <List.Icon {...props} icon="album" />}
+                        right={props => sortBy === 'album' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
+                        onPress={() => { setSortBy('album'); setIsSortMenuVisible(false); }}
+                    />
+                    <List.Item
+                        title="Duration"
+                        description="Sort by song length"
+                        left={props => <List.Icon {...props} icon="clock-outline" />}
+                        right={props => sortBy === 'duration' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
+                        onPress={() => { setSortBy('duration'); setIsSortMenuVisible(false); }}
+                    />
+                </View>
+            </ActionSheet>
+
         </View>
     );
 }

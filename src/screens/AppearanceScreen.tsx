@@ -4,6 +4,7 @@ import { Text, List, useTheme, IconButton, RadioButton, Switch } from 'react-nat
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useSettingsStore, BackgroundType } from '../store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import SettingsGroup from '../components/SettingsGroup';
 import SettingsItem from '../components/SettingsItem';
 
@@ -21,13 +22,20 @@ const THEME_COLORS = [
 const BACKGROUND_OPTIONS: { label: string; value: BackgroundType; description: string }[] = [
     { label: 'Off', value: 'off', description: 'Use default dark background' },
     { label: 'Blurred Image', value: 'blurred', description: 'Heavily blurred album artwork' },
-    { label: 'Dominant Color', value: 'blurhash', description: 'Solid color from artwork with adaptive icons' },
+    { label: 'Dominant Color', value: 'dominant', description: 'Static gradient from artwork colors' },
 ];
 
 export default function AppearanceScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
-    const { backgroundType, themeColor, isAmoledMode, setBackgroundType, setThemeColor, setAmoledMode } = useSettingsStore();
+    const { backgroundType, themeColor, isAmoledMode, setBackgroundType, setThemeColor, setAmoledMode } = useSettingsStore(useShallow(state => ({
+        backgroundType: state.backgroundType,
+        themeColor: state.themeColor,
+        isAmoledMode: state.isAmoledMode,
+        setBackgroundType: state.setBackgroundType,
+        setThemeColor: state.setThemeColor,
+        setAmoledMode: state.setAmoledMode
+    })));
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
 

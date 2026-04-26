@@ -134,6 +134,7 @@ export function getPlayerColorsFromBlurHash(blurHash: string | null | undefined)
  * Uses YIQ formula for perceived brightness
  */
 export const isColorDarkHex = (color: string): boolean => {
+    'worklet';
     if (!color || !color.startsWith('#')) return true;
     const hex = color.replace('#', '');
     if (hex.length < 6) return true;
@@ -150,6 +151,7 @@ export const isColorDarkHex = (color: string): boolean => {
  * @param amount - Amount to lighten (0 = no change, 1 = white)
  */
 export const lightenHexColor = (color: string, amount: number): string => {
+    'worklet';
     const hex = color.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
@@ -174,6 +176,7 @@ export const lightenHexColor = (color: string, amount: number): string => {
  * @param amount - Positive to lighten, negative to darken
  */
 export const adjustHexColor = (color: string, amount: number): string => {
+    'worklet';
     if (!color) return color;
     let hex = color.replace('#', '');
     if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
@@ -183,7 +186,7 @@ export const adjustHexColor = (color: string, amount: number): string => {
     let g = (num >> 8) & 0xFF;
     let b = num & 0xFF;
 
-    const strength = 0.6; // Create a clear distinct shade (60% mix)
+    const strength = Math.abs(amount) / 100;
 
     if (amount > 0) {
         // Lighten: Mix with White
@@ -210,6 +213,7 @@ export const adjustHexColor = (color: string, amount: number): string => {
  * Returns a lighter or darker shade depending on background luminance
  */
 export const getContrastingIconColorFromHex = (bgColor: string): string => {
+    'worklet';
     return isColorDarkHex(bgColor) ? adjustHexColor(bgColor, 100) : adjustHexColor(bgColor, -100);
 };
 

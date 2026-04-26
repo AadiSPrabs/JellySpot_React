@@ -299,7 +299,7 @@ export default function StorageSettingsScreen() {
                 </SettingsGroup>
 
                 {/* Storage Analytics Section */}
-                {tracks.length > 0 && (
+                {tracks.length > 0 ? (
                     <SettingsGroup title="Storage Analytics">
                         <View style={{ padding: 16 }}>
                             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
@@ -344,7 +344,7 @@ export default function StorageSettingsScreen() {
                                         {/* Segmented Progress Bar */}
                                         <View style={styles.segmentedBar}>
                                             {categories.map((cat, index) => (
-                                                cat.percent > 0 && (
+                                                cat.percent > 0 ? (
                                                     <View
                                                         key={cat.label}
                                                         style={{
@@ -358,7 +358,7 @@ export default function StorageSettingsScreen() {
                                                             borderBottomRightRadius: index === categories.length - 1 ? 6 : 0,
                                                         }}
                                                     />
-                                                )
+                                                ) : null
                                             ))}
                                         </View>
 
@@ -393,10 +393,10 @@ export default function StorageSettingsScreen() {
                             })()}
                         </View>
                     </SettingsGroup>
-                )}
+                ) : null}
 
                 {/* Folder Selection Section */}
-                {availableFolders.length > 0 && (
+                {availableFolders.length > 0 ? (
                     <SettingsGroup title="Folder Filter">
                         <View style={{ padding: 16 }}>
                             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
@@ -458,7 +458,7 @@ export default function StorageSettingsScreen() {
                             </View>
                         </View>
                     </SettingsGroup>
-                )}
+                ) : null}
 
                 {/* Help Text */}
                 <View style={styles.helpSection}>

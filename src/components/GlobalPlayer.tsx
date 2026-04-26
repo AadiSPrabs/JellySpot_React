@@ -21,11 +21,10 @@ const MINIPLAYER_HEIGHT = 64;
 const DRAG_THRESHOLD = 100;
 
 export default function GlobalPlayer() {
-    const { currentTrack, isPlayerExpanded, setPlayerExpanded, heroCardVisible } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlayerExpanded, setPlayerExpanded } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlayerExpanded: state.isPlayerExpanded,
         setPlayerExpanded: state.setPlayerExpanded,
-        heroCardVisible: state.heroCardVisible,
     })));
 
     const { width, height: SCREEN_HEIGHT } = useWindowDimensions();
@@ -37,7 +36,15 @@ export default function GlobalPlayer() {
     const COLLAPSED_Y = SCREEN_HEIGHT - (MINIPLAYER_HEIGHT + BOTTOM_OFFSET);
     const EXPANDED_Y = 0;
 
-    const SPRING_CONFIG = { damping: 25, stiffness: 200, overshootClamping: true };
+    // Rigid, high-damping spring for a weighted, modern iOS feel (no over-bouncing)
+    const SPRING_CONFIG = { 
+        mass: 1, 
+        damping: 38, 
+        stiffness: 400, 
+        overshootClamping: false,
+        restDisplacementThreshold: 0.1,
+        restSpeedThreshold: 5 
+    };
 
     const translateY = useSharedValue(COLLAPSED_Y + 200); // Initialize offscreen
     const startY = useSharedValue(0);
@@ -53,22 +60,15 @@ export default function GlobalPlayer() {
     useEffect(() => {
         // If track exists and player is NOT expanded, animate to new collapsed Y
         if (currentTrack && !isPlayerExpanded) {
-            translateY.value = withSpring(COLLAPSED_Y, {
-                damping: 20,
-                stiffness: 150,
-                overshootClamping: true
-            });
+            translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
         }
     }, [COLLAPSED_Y]);
 
     useEffect(() => {
         if (currentTrack) {
-            // On track appearance, animate to correct position if it was hidden
+            // On track appearance, animate to correct position
             if (isPlayerExpanded) {
                 translateY.value = withSpring(EXPANDED_Y, SPRING_CONFIG);
-            } else if (heroCardVisible) {
-                // Hero card visible: slide mini player off-screen
-                translateY.value = withSpring(COLLAPSED_Y + 200, SPRING_CONFIG);
             } else {
                 translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
             }
@@ -76,7 +76,7 @@ export default function GlobalPlayer() {
             // Animate down off-screen
             translateY.value = withSpring(COLLAPSED_Y + 200, SPRING_CONFIG);
         }
-    }, [currentTrack, isPlayerExpanded, COLLAPSED_Y, heroCardVisible]);
+    }, [currentTrack, isPlayerExpanded, COLLAPSED_Y]);
 
     const dismissPlayer = () => {
         usePlayerStore.getState().reset();
@@ -101,24 +101,25 @@ export default function GlobalPlayer() {
         .onEnd((event) => {
             if (isExpandedShared.value) {
                 // We are currently expanded; user can only drag DOWN to collapse.
-                if (translateY.value > EXPANDED_Y + (SCREEN_HEIGHT * 0.15) || event.velocityY > 500) {
-                    translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
+                if (translateY.value > EXPANDED_Y + (SCREEN_HEIGHT * 0.15) || event.velocityY > 600) {
+                    translateY.value = withSpring(COLLAPSED_Y, { ...SPRING_CONFIG, velocity: event.velocityY });
                     isExpandedShared.value = false;
                     runOnJS(setPlayerExpanded)(false);
                 } else {
-                    translateY.value = withSpring(EXPANDED_Y, SPRING_CONFIG);
+                    translateY.value = withSpring(EXPANDED_Y, { ...SPRING_CONFIG, velocity: event.velocityY });
                 }
             } else {
                 // We are currently collapsed
-                if (translateY.value < COLLAPSED_Y - DRAG_THRESHOLD || event.velocityY < -500) {
-                    translateY.value = withSpring(EXPANDED_Y, SPRING_CONFIG);
+                if (translateY.value < COLLAPSED_Y - DRAG_THRESHOLD || event.velocityY < -600) {
+                    translateY.value = withSpring(EXPANDED_Y, { ...SPRING_CONFIG, velocity: event.velocityY });
                     isExpandedShared.value = true;
                     runOnJS(setPlayerExpanded)(true);
                 } else if (translateY.value > COLLAPSED_Y + 40 || event.velocityY > 500) {
                     // Swiped Down to stop/dismiss
+                    translateY.value = withSpring(COLLAPSED_Y + 200, { ...SPRING_CONFIG, velocity: event.velocityY });
                     runOnJS(dismissPlayer)();
                 } else {
-                    translateY.value = withSpring(COLLAPSED_Y, SPRING_CONFIG);
+                    translateY.value = withSpring(COLLAPSED_Y, { ...SPRING_CONFIG, velocity: event.velocityY });
                 }
             }
         });
@@ -157,7 +158,7 @@ export default function GlobalPlayer() {
     });
 
     return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <View style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]} pointerEvents="box-none">
             <GestureDetector gesture={panGesture}>
                 <Animated.View style={[styles.playerContainer, containerStyle]} pointerEvents={isPlayerExpanded ? "auto" : "box-none"}>
                     {/* Fullscreen Player Layer */}

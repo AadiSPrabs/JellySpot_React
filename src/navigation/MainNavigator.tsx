@@ -27,6 +27,7 @@ import SourceModeSettingsScreen from '../screens/SourceModeSettingsScreen';
 import DependenciesScreen from '../screens/DependenciesScreen';
 import DownloadsScreen from '../screens/DownloadsScreen';
 import DownloadSettingsScreen from '../screens/DownloadSettingsScreen';
+import StatsScreen from '../screens/StatsScreen';
 
 // Width of the left tab bar in landscape mode - exported for use by MiniPlayer
 export const LEFT_BAR_WIDTH = 100;
@@ -146,6 +147,7 @@ function HomeStackNavigator() {
             <HomeStack.Screen name="Home" component={HomeScreen} />
             <HomeStack.Screen name="Detail" component={DetailScreen} />
             <HomeStack.Screen name="Settings" component={SettingsScreen} />
+            <HomeStack.Screen name="Stats" component={StatsScreen} />
             <HomeStack.Screen name="Appearance" component={AppearanceScreen} />
             <HomeStack.Screen name="PlaybackSettings" component={PlaybackSettingsScreen} />
             <HomeStack.Screen name="StorageSettings" component={StorageSettingsScreen} />
@@ -186,6 +188,7 @@ function LibraryStackNavigator() {
             <LibraryStack.Screen name="Library" component={LibraryScreen} />
             <LibraryStack.Screen name="Detail" component={DetailScreen} />
             <LibraryStack.Screen name="Settings" component={SettingsScreen} />
+            <LibraryStack.Screen name="Stats" component={StatsScreen} />
             <LibraryStack.Screen name="Appearance" component={AppearanceScreen} />
             <LibraryStack.Screen name="PlaybackSettings" component={PlaybackSettingsScreen} />
             <LibraryStack.Screen name="StorageSettings" component={StorageSettingsScreen} />

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, StyleSheet, FlatList, Vibration, TouchableOpacity, useWindowDimensions, RefreshControl, NativeScrollEvent, Platform } from 'react-native';
+import { View, StyleSheet, Vibration, TouchableOpacity, useWindowDimensions, RefreshControl, NativeScrollEvent, Platform } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Avatar, useTheme, IconButton, TextInput, Button, TouchableRipple } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
@@ -9,6 +10,7 @@ import { HomeStackParamList } from '../types/navigation';
 import { jellyfinApi } from '../api/jellyfin';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { DatabaseService } from '../services/DatabaseService';
 import { Skeleton, ListItemSkeleton, CardSkeleton } from '../components/Skeleton';
@@ -111,25 +113,47 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
     const [isLoading, setIsLoading] = React.useState(true);
     const localLibrary = useLocalLibraryStore();
 
-    const fetchPlaylists = async () => {
+    const CACHE_TTL = 5 * 60 * 1000;
+    const getCache = (key: string) => {
+        const cached = (global as any).libraryCache?.[key];
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) return cached.data;
+        return null;
+    };
+    const setCache = (key: string, data: any) => {
+        if (!(global as any).libraryCache) (global as any).libraryCache = {};
+        (global as any).libraryCache[key] = { data, timestamp: Date.now() };
+    };
+
+    const fetchPlaylists = async (isManual = false) => {
+        if (!isManual) {
+            const cached = getCache(`playlists_${dataSource}`);
+            if (cached) { setPlaylists(cached); setIsLoading(false); return; }
+        }
+        
         if (dataSource === 'local') {
-            setPlaylists(localLibrary.playlists.map(p => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackIds?.length || 0, isLocal: true })));
+            const data = localLibrary.playlists.map(p => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackIds?.length || 0, isLocal: true }));
+            setPlaylists(data);
+            setCache(`playlists_${dataSource}`, data);
         } else {
             try {
                 const data = await jellyfinApi.getPlaylists();
-                if (data?.Items) setPlaylists(data.Items);
+                if (data?.Items) {
+                    setPlaylists(data.Items);
+                    setCache(`playlists_${dataSource}`, data.Items);
+                }
             } catch (error) { console.error(error); }
         }
+        setIsLoading(false);
     };
 
     const onRefresh = async () => {
         setIsRefreshing(true);
-        await fetchPlaylists();
+        await fetchPlaylists(true);
         setIsRefreshing(false);
     };
 
     React.useEffect(() => {
-        fetchPlaylists().then(() => setIsLoading(false));
+        fetchPlaylists();
     }, [dataSource, localLibrary.playlists]);
 
     const getStaticItems = () => {
@@ -148,8 +172,8 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
     if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
 
     return (
-        <View style={{ width: pageWidth }}>
-            <FlatList
+        <View style={{ width: pageWidth, flex: 1 }}>
+            <FlashList
                 data={[...getStaticItems(), ...playlists]}
                 renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
                 keyExtractor={(item) => (item.Id || item.id) + 'p'}
@@ -157,10 +181,7 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
                 ListEmptyComponent={<EmptyState icon="music-note-off" title="No Playlists found" description="Create a playlist to get started" />}
-                removeClippedSubviews={Platform.OS === 'android'}
-                initialNumToRender={10}
-                maxToRenderPerBatch={10}
-                windowSize={5}
+                estimatedItemSize={64}
             />
         </View>
     );
@@ -171,33 +192,53 @@ const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource,
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
 
-    const fetchArtists = async () => {
+    const CACHE_TTL = 5 * 60 * 1000;
+    const getCache = (key: string) => {
+        const cached = (global as any).libraryCache?.[key];
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) return cached.data;
+        return null;
+    };
+    const setCache = (key: string, data: any) => {
+        if (!(global as any).libraryCache) (global as any).libraryCache = {};
+        (global as any).libraryCache[key] = { data, timestamp: Date.now() };
+    };
+
+    const fetchArtists = async (isManual = false) => {
+        if (!isManual) {
+            const cached = getCache(`artists_${dataSource}`);
+            if (cached) { setArtists(cached); setIsLoading(false); return; }
+        }
+
         try {
+            let data: any[] = [];
             if (dataSource === 'local') {
                 const localArtists = await DatabaseService.getAllArtists();
-                setArtists(localArtists.map(a => ({ Id: a.artistId, Name: a.artist, Type: 'MusicArtist', ImageUrl: a.imageUrl })));
+                data = localArtists.map(a => ({ Id: a.artistId, Name: a.artist, Type: 'MusicArtist', ImageUrl: a.imageUrl }));
             } else {
-                const data = await jellyfinApi.getItems({ IncludeItemTypes: 'MusicArtist', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', Fields: 'PrimaryImageAspectRatio,BasicSyncInfo' });
-                if (data?.Items) setArtists(data.Items);
+                const res = await jellyfinApi.getItems({ IncludeItemTypes: 'MusicArtist', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', Fields: 'PrimaryImageAspectRatio,BasicSyncInfo' });
+                data = res?.Items || [];
             }
+            setArtists(data);
+            setCache(`artists_${dataSource}`, data);
         } catch (error) { console.error(error); }
+        setIsLoading(false);
     };
 
     const onRefresh = async () => {
         setIsRefreshing(true);
-        await fetchArtists();
+        await fetchArtists(true);
         setIsRefreshing(false);
     };
 
     React.useEffect(() => {
-        fetchArtists().then(() => setIsLoading(false));
+        fetchArtists();
     }, [dataSource]);
 
     if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
 
     return (
-        <View style={{ width: pageWidth }}>
-            <FlatList
+        <View style={{ width: pageWidth, flex: 1 }}>
+            <FlashList
                 data={artists}
                 renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
                 keyExtractor={(item) => (item.Id || item.id) + 'ar'}
@@ -205,10 +246,7 @@ const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource,
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
                 ListEmptyComponent={<EmptyState icon="account-music" title="No Artists found" />}
-                removeClippedSubviews={Platform.OS === 'android'}
-                initialNumToRender={10}
-                maxToRenderPerBatch={10}
-                windowSize={5}
+                estimatedItemSize={64}
             />
         </View>
     );
@@ -219,33 +257,53 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, 
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
 
-    const fetchAlbums = async () => {
+    const CACHE_TTL = 5 * 60 * 1000;
+    const getCache = (key: string) => {
+        const cached = (global as any).libraryCache?.[key];
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) return cached.data;
+        return null;
+    };
+    const setCache = (key: string, data: any) => {
+        if (!(global as any).libraryCache) (global as any).libraryCache = {};
+        (global as any).libraryCache[key] = { data, timestamp: Date.now() };
+    };
+
+    const fetchAlbums = async (isManual = false) => {
+        if (!isManual) {
+            const cached = getCache(`albums_${dataSource}`);
+            if (cached) { setAlbums(cached); setIsLoading(false); return; }
+        }
+
         try {
+            let data: any[] = [];
             if (dataSource === 'local') {
                 const localAlbums = await DatabaseService.getAllAlbums();
-                setAlbums(localAlbums.map(a => ({ Id: a.album, Name: a.album, AlbumArtist: a.artist, Type: 'MusicAlbum', ImageUrl: a.imageUrl })));
+                data = localAlbums.map(a => ({ Id: a.album, Name: a.album, AlbumArtist: a.artist, Type: 'MusicAlbum', ImageUrl: a.imageUrl }));
             } else {
-                const data = await jellyfinApi.getItems({ IncludeItemTypes: 'MusicAlbum', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', Fields: 'PrimaryImageAspectRatio,BasicSyncInfo' });
-                if (data?.Items) setAlbums(data.Items);
+                const res = await jellyfinApi.getItems({ IncludeItemTypes: 'MusicAlbum', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', Fields: 'PrimaryImageAspectRatio,BasicSyncInfo' });
+                data = res?.Items || [];
             }
+            setAlbums(data);
+            setCache(`albums_${dataSource}`, data);
         } catch (error) { console.error(error); }
+        setIsLoading(false);
     };
 
     const onRefresh = async () => {
         setIsRefreshing(true);
-        await fetchAlbums();
+        await fetchAlbums(true);
         setIsRefreshing(false);
     };
 
     React.useEffect(() => {
-        fetchAlbums().then(() => setIsLoading(false));
+        fetchAlbums();
     }, [dataSource]);
 
     if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
 
     return (
-        <View style={{ width: pageWidth }}>
-            <FlatList
+        <View style={{ width: pageWidth, flex: 1 }}>
+            <FlashList
                 data={albums}
                 renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
                 keyExtractor={(item) => (item.Id || item.id) + 'al'}
@@ -253,10 +311,7 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, 
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
                 ListEmptyComponent={<EmptyState icon="album" title="No Albums found" />}
-                removeClippedSubviews={Platform.OS === 'android'}
-                initialNumToRender={10}
-                maxToRenderPerBatch={10}
-                windowSize={5}
+                estimatedItemSize={64}
             />
         </View>
     );
@@ -266,7 +321,7 @@ export default function LibraryScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
     const theme = useTheme();
     const user = useAuthStore((state) => state.user);
-    const { dataSource } = useSettingsStore();
+    const { dataSource } = useSettingsStore(useShallow(state => ({ dataSource: state.dataSource })));
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
 

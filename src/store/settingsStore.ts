@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-export type BackgroundType = 'off' | 'blurred' | 'blurhash';
+export type BackgroundType = 'off' | 'blurred' | 'dominant';
 export type SourceMode = 'jellyfin' | 'local' | 'both';
 
 interface LocalProfile {

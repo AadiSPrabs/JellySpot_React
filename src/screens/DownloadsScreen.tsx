@@ -145,7 +145,7 @@ export default function DownloadsScreen() {
                                 </Text>
                             </View>
                         )}
-                        {item.status === 'failed' && item.errorMessage && (
+                        {item.status === 'failed' && !!item.errorMessage && (
                             <Text variant="labelSmall" style={{ color: '#f44336' }} numberOfLines={1}>
                                 {item.errorMessage}
                             </Text>

@@ -185,7 +185,7 @@ export default function ActionSheet({
                     {/* Drag handle area (intercepts touches) */}
                     <View {...panResponder.panHandlers} style={styles.headerArea}>
                         <View style={styles.dragPill} />
-                        {title && (
+                        {!!title && (
                             <View style={styles.titleRow}>
                                 <Text variant="titleMedium" style={styles.titleText} numberOfLines={1}>{title}</Text>
                                 <TouchableOpacity onPress={() => animateClose()} style={styles.closeButton} hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}>

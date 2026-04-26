@@ -18,6 +18,7 @@ interface PlayerState {
     queue: Track[];
     originalQueue: Track[];
     isPlaying: boolean;
+    isBuffering: boolean;
     positionMillis: number;
     durationMillis: number;
     shuffleMode: boolean;
@@ -47,8 +48,6 @@ interface PlayerState {
     toggleCurrentTrackFavorite: () => Promise<void>;
     isPlayerExpanded: boolean;
     setPlayerExpanded: (expanded: boolean) => void;
-    heroCardVisible: boolean;
-    setHeroCardVisible: (visible: boolean) => void;
 }
 
 // Network state cache for battery optimization (30-second TTL)
@@ -138,7 +137,7 @@ const persistQueueState = () => {
         // Limit size for safety
         if (state.queue.length > 500) {
             const currentIndex = state.currentTrack
-                ? state.queue.findIndex(t => t.id === state.currentTrack?.id)
+                ? state.queue.findIndex(t => (t.queueItemId || t.id) === (state.currentTrack?.queueItemId || state.currentTrack?.id))
                 : 0;
             const start = Math.max(0, currentIndex - 100);
             const end = Math.min(state.queue.length, currentIndex + 400);
@@ -171,6 +170,7 @@ let listenerCleanups: (() => void)[] = [];
 export const usePlayerStore = create<PlayerState>((set, get) => ({
     currentTrack: null,
     isPlaying: false,
+    isBuffering: false,
     queue: [],
     originalQueue: [],
     positionMillis: 0,
@@ -182,8 +182,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     clearPlaybackError: () => set({ playbackError: null }),
     isPlayerExpanded: false,
     setPlayerExpanded: (expanded: boolean) => set({ isPlayerExpanded: expanded }),
-    heroCardVisible: false,
-    setHeroCardVisible: (visible: boolean) => set({ heroCardVisible: visible }),
 
     // Initialize listeners
     init: async () => {
@@ -205,9 +203,39 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         });
         listenerCleanups.push(() => sub1.remove());
 
-        const sub2 = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
-            // Fallback: Queue ended, playing next
-            playNext();
+        // Track last handled track to prevent duplicate processing
+        let lastHandledTrackId: string | null = null;
+
+        const sub2 = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async (event: any) => {
+            // PlaybackQueueEnded fires when the NATIVE queue is exhausted.
+            // Since we only buffer 1-2 tracks ahead in the native queue, this fires
+            // every time the last buffered track finishes. We need to check if there
+            // are more tracks in our logical queue and load the next one.
+            const { queue: currentQueue, currentTrack: ct, repeatMode: rm } = get();
+            if (!ct || currentQueue.length === 0) return;
+
+            const currentIndex = currentQueue.findIndex(t => (t.queueItemId || t.id) === (ct.queueItemId || ct.id));
+            if (currentIndex === -1) return;
+
+            let nextTrack: Track | undefined;
+            if (rm === 'one') {
+                nextTrack = ct;
+            } else if (currentIndex < currentQueue.length - 1) {
+                nextTrack = currentQueue[currentIndex + 1];
+            } else if (rm === 'all') {
+                nextTrack = currentQueue[0];
+            }
+
+            if (nextTrack) {
+                // Prevent duplicate: don't replay the same track unless repeat-one
+                const nextId = nextTrack.queueItemId || nextTrack.id;
+                if (nextId === lastHandledTrackId && rm !== 'one') return;
+                lastHandledTrackId = nextId;
+                await get().playTrack(nextTrack);
+            } else {
+                // Queue truly ended and repeat is off — stop playback
+                set({ isPlaying: false });
+            }
         });
         listenerCleanups.push(() => sub2.remove());
 
@@ -223,18 +251,46 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             }
 
             // INSTANT RESPONSE: Update current track status in store first
-            const newTrack = queue.find(t => t.id === event.track.id || t.streamUrl === event.track.url);
+            const newTrack = queue.find(t => (t.queueItemId || t.id) === event.track.id || t.streamUrl === event.track.url);
             if (newTrack) {
+                // Prevent duplicate processing of the same track transition
+                const newTrackUniqueId = newTrack.queueItemId || newTrack.id;
+                if (newTrackUniqueId === lastHandledTrackId && repeatMode !== 'one') {
+                    return; // Already handled this exact track
+                }
+                lastHandledTrackId = newTrackUniqueId;
+
+                // LEAN QUEUE MANAGEMENT: Remove the previous track from the native queue
+                // to prevent it from growing indefinitely.
+                try {
+                    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+                    if (activeIndex > 0) {
+                        // Remove all tracks before the current active one
+                        const indicesToRemove = Array.from({ length: activeIndex }, (_, i) => i);
+                        await TrackPlayer.remove(indicesToRemove);
+                    }
+                } catch (e) {
+                    console.warn('[PlayerStore] Failed to prune native queue:', e);
+                }
+
+                // Capture the previous track's listen duration BEFORE resetting
+                const previousPositionMillis = get().positionMillis;
+
+                // Reset position to 0 immediately on track change to prevent seek bar from
+                // showing stale position from the old track
                 set({
                     currentTrack: newTrack,
                     positionMillis: 0,
                     durationMillis: newTrack.durationMillis || 0
                 });
+                // Mark the time of the track change so progress updates can ignore stale values
+                lastTrackChangeTime = Date.now();
 
                 // Record play for the PREVIOUS track now that we know we moved on
                 if (previousTrack && previousTrack.id !== newTrack.id) {
                     const source = previousTrack.streamUrl?.startsWith('file://') ? 'local' : 'jellyfin';
-                    DatabaseService.recordPlay(previousTrack, source, 0, false, previousTrack.playlistId).catch(() => { });
+                    const listenDuration = previousPositionMillis > 0 ? previousPositionMillis : (previousTrack.durationMillis || 0);
+                    DatabaseService.recordPlay(previousTrack, source, listenDuration, previousPositionMillis > (previousTrack.durationMillis || 0) * 0.8, previousTrack.playlistId).catch(() => { });
 
                     // Also report stop to Jellyfin if not local
                     if (source === 'jellyfin') {
@@ -255,7 +311,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
                 const { queue: currentQueue, repeatMode: currentRepeat } = get();
                 let nextTrack: Track | undefined;
-                const currentIndex = currentQueue.findIndex(t => t.id === newTrack.id);
+                const currentIndex = currentQueue.findIndex(t => (t.queueItemId || t.id) === (newTrack.queueItemId || newTrack.id));
 
                 if (currentRepeat === 'one') {
                     nextTrack = newTrack;
@@ -271,11 +327,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                         const currentNativeIndex = await TrackPlayer.getActiveTrackIndex();
                         const nextNativeTrack = nativeQueue[currentNativeIndex + 1];
 
-                        if (!nextNativeTrack || nextNativeTrack.id !== nextTrack.id) {
+                        if (!nextNativeTrack || nextNativeTrack.id !== (nextTrack.queueItemId || nextTrack.id)) {
                             const nextUrl = await getStreamUrl(nextTrack);
                             if (nextUrl) {
                                 await audioService.addToQueue({
-                                    id: nextTrack.id,
+                                    id: nextTrack.queueItemId || nextTrack.id,
                                     url: nextUrl,
                                     title: nextTrack.name,
                                     artist: nextTrack.artist,
@@ -294,14 +350,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         const sub4 = TrackPlayer.addEventListener(Event.PlaybackState, (event: any) => {
             const isPlayingState = event.state === 'playing' || event.state === 'buffering' || event.state === 'loading';
-            set((state) => (state.isPlaying !== isPlayingState ? { isPlaying: isPlayingState } : {}));
+            const isBufferingState = event.state === 'buffering' || event.state === 'loading';
+            set((state) => {
+                const updates: Partial<PlayerState> = {};
+                if (state.isPlaying !== isPlayingState) updates.isPlaying = isPlayingState;
+                if (state.isBuffering !== isBufferingState) updates.isBuffering = isBufferingState;
+                return Object.keys(updates).length > 0 ? updates : {};
+            });
         });
         listenerCleanups.push(() => sub4.remove());
 
         // Progress update throttling for battery optimization
         let lastProgressUpdate = 0;
         let lastServerProgressUpdate = 0;
+        let lastTrackChangeTime = 0;
         const BACKGROUND_THROTTLE_MS = 5000; // Only update every 5 seconds in background
+        const TRACK_CHANGE_GRACE_MS = 300; // Ignore progress updates for 300ms after track change
 
         const sub5 = TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, async (event: any) => {
             const { sleepTimerTarget, durationMillis: existingDuration } = get();
@@ -310,6 +374,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             if (sleepTimerTarget && typeof sleepTimerTarget === 'number' && Date.now() > sleepTimerTarget) {
                 set({ isPlaying: false, sleepTimerTarget: null });
                 audioService.pause();
+            }
+
+            // Ignore stale progress updates right after a track change
+            // (native player may briefly report old track's position)
+            if (Date.now() - lastTrackChangeTime < TRACK_CHANGE_GRACE_MS) {
+                return;
             }
 
             // Throttle updates when app is in background to save battery
@@ -460,14 +530,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             }
         }
 
+        const trackWithId = {
+            ...track,
+            queueItemId: track.queueItemId || `${track.id}-${Math.random().toString(36).substring(2, 9)}`
+        };
+
         // INSTANT UI UPDATE: Update store BEFORE native calls so UI reflects immediately
         const { queue } = get();
-        let currentIndex = queue.findIndex(t => t.id === track.id);
+        let currentIndex = queue.findIndex(t => (t.queueItemId || t.id) === (trackWithId.queueItemId || trackWithId.id));
         if (currentIndex === -1) {
-            set({ queue: [track], originalQueue: [track], currentTrack: track, isPlaying: true, positionMillis: 0, durationMillis: track.durationMillis || 0 });
+            set({ queue: [trackWithId], originalQueue: [trackWithId], currentTrack: trackWithId, isPlaying: true, positionMillis: 0, durationMillis: trackWithId.durationMillis || 0 });
             currentIndex = 0;
         } else {
-            set({ currentTrack: track, isPlaying: true, positionMillis: 0, durationMillis: track.durationMillis || 0 });
+            set({ currentTrack: trackWithId, isPlaying: true, positionMillis: 0, durationMillis: trackWithId.durationMillis || 0 });
         }
 
         // BACKGROUND: All native player operations happen after UI is updated
@@ -478,7 +553,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                 : undefined;
 
             await audioService.play({
-                id: track.id,
+                id: trackWithId.queueItemId || trackWithId.id,
                 url: streamUrl,
                 title: track.name,
                 artist: track.artist,
@@ -488,7 +563,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
             // Pre-fetch next track in background
             const { queue: currentQueue, repeatMode } = get();
-            const idx = currentQueue.findIndex(t => t.id === track.id);
+            const idx = currentQueue.findIndex(t => (t.queueItemId || t.id) === (trackWithId.queueItemId || trackWithId.id));
             let nextTrack: Track | undefined;
             if (repeatMode === 'one') {
                 nextTrack = track;
@@ -504,7 +579,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                     try {
                         const nextUrl = await getStreamUrl(nt);
                         await audioService.addToQueue({
-                            id: nt.id,
+                            id: nt.queueItemId || nt.id,
                             url: nextUrl,
                             title: nt.name,
                             artist: nt.artist,
@@ -624,7 +699,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             set({ queue: [trackWithId, ...queue] });
             return;
         }
-        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        const currentIndex = queue.findIndex(t => (t.queueItemId || t.id) === (currentTrack.queueItemId || currentTrack.id));
         const newQueue = [...queue];
         newQueue.splice(currentIndex + 1, 0, trackWithId);
         set({ queue: newQueue });
@@ -677,7 +752,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         const { queue, currentTrack, playTrack, repeatMode } = get();
         if (!currentTrack || queue.length === 0) return;
 
-        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        const currentIndex = queue.findIndex(t => (t.queueItemId || t.id) === (currentTrack.queueItemId || currentTrack.id));
         if (currentIndex === -1) return;
 
         // Calculate target index
@@ -716,7 +791,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             const currentNativeIndex = await audioService.getActiveTrackIndex();
 
             if (currentNativeIndex !== undefined && nativeQueue && nativeQueue.length > 0) {
-                const targetNativeIndex = nativeQueue.findIndex(t => t.id === targetTrack.id);
+                const targetNativeIndex = nativeQueue.findIndex(t => t.id === (targetTrack.queueItemId || targetTrack.id));
 
                 // Only skip if found AND it's different (unless repeating one)
                 if (targetNativeIndex !== -1 && (targetNativeIndex !== currentNativeIndex || repeatMode === 'one')) {
@@ -732,16 +807,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     },
 
     playPrevious: async () => {
-        const { queue, currentTrack, playTrack, repeatMode, positionMillis, seek } = get();
+        const { queue, currentTrack, playTrack, repeatMode } = get();
         if (!currentTrack) return;
 
-        // Standard UX: If we are more than 3 seconds into a track, pressing "previous" should just restart it.
-        if (positionMillis > 3000) {
-            await seek(0);
-            return;
-        }
-
-        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        const currentIndex = queue.findIndex(t => (t.queueItemId || t.id) === (currentTrack.queueItemId || currentTrack.id));
         if (currentIndex === -1) return;
 
         let targetIndex = currentIndex - 1;

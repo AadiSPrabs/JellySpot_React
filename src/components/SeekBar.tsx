@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, LayoutChangeEvent, PanResponder, Animated } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { useTheme } from 'react-native-paper';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    withTiming,
+    withSpring,
+    runOnJS
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 interface SeekBarProps {
     progress: number; // 0 to 1
@@ -21,92 +29,97 @@ export const SeekBar: React.FC<SeekBarProps> = ({
     const activeColor = color || theme.colors.primary;
     const inactiveColor = trackColor || theme.colors.surfaceVariant;
 
-    const [width, setWidth] = useState(0);
-    const [isDragging, setIsDragging] = useState(false);
+    const [width, setWidth] = useState(1);
+    const isDragging = useSharedValue(false);
+    
+    // Shared values for UI-thread fluid animation
+    const panProgress = useSharedValue(0); 
+    const displayProgress = useSharedValue(0); 
 
-    // Smooth animation value for the progress bar
-    const animatedProgress = React.useRef(new Animated.Value(0)).current;
-
-    // React to external progress updates and interpolate smoothly
-    React.useEffect(() => {
-        if (!isDragging) {
-            Animated.timing(animatedProgress, {
-                toValue: progress,
-                duration: 250, // Matches most player poll intervals smoothly
-                useNativeDriver: false, // Cannot use native driver for width/left layout properties
-            }).start();
+    // Smoothly interpolate incoming network/play progress when NOT dragging
+    useEffect(() => {
+        if (!isDragging.value) {
+            // Using withSpring here makes general playback look extremely smooth instead of linear stuttering
+            displayProgress.value = withTiming(progress, { duration: 250 });
         }
-    }, [progress, isDragging]);
+    }, [progress]);
 
     const onLayout = (e: LayoutChangeEvent) => {
-        setWidth(e.nativeEvent.layout.width);
+        setWidth(Math.max(1, e.nativeEvent.layout.width));
     };
 
-
-
-    // Better implementation using simpler logic if possible.
-    // Let's use `react-native-slider` logic if we could, but we are building custom.
-    // Let's use a ref for the start progress.
-    const startProgressRx = React.useRef(0);
-
-    const panResponderImplemented = React.useMemo(() => PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onStartShouldSetPanResponderCapture: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponderCapture: () => true,
-
-        onPanResponderGrant: (evt, gestureState) => {
-            setIsDragging(true);
-            const locationX = evt.nativeEvent.locationX;
-            const p = Math.max(0, Math.min(1, locationX / width));
-            animatedProgress.setValue(p);
-            startProgressRx.current = p;
-        },
-        onPanResponderMove: (evt, gestureState) => {
-            const deltaProgress = gestureState.dx / width;
-            const newProgress = Math.max(0, Math.min(1, startProgressRx.current + deltaProgress));
-            animatedProgress.setValue(newProgress);
-        },
-        onPanResponderRelease: (evt, gestureState) => {
-            const deltaProgress = gestureState.dx / width;
-            const finalProgress = Math.max(0, Math.min(1, startProgressRx.current + deltaProgress));
-            setIsDragging(false);
-            if (durationMillis) {
-                onSeek(finalProgress * durationMillis);
-            }
-        },
-        onPanResponderTerminate: () => {
-            setIsDragging(false);
+    const handleSeekEnd = (newProgress: number) => {
+        if (durationMillis) {
+            onSeek(newProgress * durationMillis);
         }
-    }), [width, durationMillis, onSeek]);
+    };
 
-    // Width interpolation
-    const activeWidth = animatedProgress.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0%', '100%'],
-        extrapolate: 'clamp'
+    const panGesture = Gesture.Pan()
+        .onStart((e) => {
+            isDragging.value = true;
+            // Instantly snap to grabbed position
+            const p = Math.max(0, Math.min(1, e.x / width));
+            panProgress.value = p;
+            displayProgress.value = p; // Instant feedback
+        })
+        .onUpdate((e) => {
+            // Update scrub position exclusively on UI thread
+            const p = Math.max(0, Math.min(1, e.x / width));
+            panProgress.value = p;
+            displayProgress.value = p;
+        })
+        .onEnd(() => {
+            isDragging.value = false;
+            runOnJS(handleSeekEnd)(panProgress.value);
+        });
+
+    // Tight iOS-style Spring configuration 
+    const SPRING_CONFIG = { mass: 1, damping: 25, stiffness: 350 };
+
+    const trackStyle = useAnimatedStyle(() => {
+        // Track height expands smoothly when dragging
+        const height = withSpring(isDragging.value ? 8 : 4, SPRING_CONFIG);
+        return { height };
+    });
+
+    const activeTrackStyle = useAnimatedStyle(() => {
+        const height = withSpring(isDragging.value ? 8 : 4, SPRING_CONFIG);
+        return {
+            height,
+            width: `${displayProgress.value * 100}%`
+        };
+    });
+
+    const thumbStyle = useAnimatedStyle(() => {
+        // Thumb scales up beautifully when grabbed
+        const scale = withSpring(isDragging.value ? 1.5 : 1, SPRING_CONFIG);
+        return {
+            left: `${displayProgress.value * 100}%`,
+            transform: [{ scale }]
+        };
     });
 
     return (
-        <View style={styles.container} onLayout={onLayout} {...panResponderImplemented.panHandlers}>
-            {/* HitSlop for easier grabbing isn't passed to View, but the Container is large enough */}
-            <View style={styles.touchArea} pointerEvents="none">
-                {/* Background Track */}
-                <View style={[styles.track, { backgroundColor: inactiveColor }]} />
+        <GestureDetector gesture={panGesture}>
+            <View style={styles.container} onLayout={onLayout}>
+                <View style={styles.touchArea} pointerEvents="none">
+                    {/* Background Track */}
+                    <Animated.View style={[styles.track, trackStyle, { backgroundColor: inactiveColor }]} />
 
-                {/* Active Progress Track */}
-                <Animated.View style={[styles.activeTrack, { width: activeWidth, backgroundColor: activeColor }]} />
+                    {/* Active Progress Track */}
+                    <Animated.View style={[styles.activeTrack, activeTrackStyle, { backgroundColor: activeColor }]} />
 
-                {/* Thumb */}
-                <Animated.View style={[styles.thumb, { left: activeWidth, backgroundColor: activeColor }]} />
+                    {/* Thumb */}
+                    <Animated.View style={[styles.thumb, thumbStyle, { backgroundColor: activeColor }]} />
+                </View>
             </View>
-        </View>
+        </GestureDetector>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
-        height: 40, // Large height for touch area
+        height: 48, // Generous height for easier scrubbing touch target
         justifyContent: 'center',
         width: '100%',
     },
@@ -116,21 +129,24 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     track: {
-        height: 4,
         width: '100%',
-        borderRadius: 2,
+        borderRadius: 4,
         position: 'absolute',
     },
     activeTrack: {
-        height: 4,
-        borderRadius: 2,
+        borderRadius: 4,
         position: 'absolute',
     },
     thumb: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
+        width: 14,
+        height: 14,
+        borderRadius: 7,
         position: 'absolute',
-        marginLeft: -6, // Center the thumb on the end of the bar
+        marginLeft: -7,
+        elevation: 2, // Tiny shadow
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 1.41,
     }
 });

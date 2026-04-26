@@ -249,6 +249,16 @@ class LyricsService {
             return false;
         }
     }
+
+    async deleteOfflineLyrics(trackId: string) {
+        try {
+            await db.delete(offlineLyrics).where(eq(offlineLyrics.id, trackId));
+            return true;
+        } catch (e) {
+            console.error('Failed to delete offline lyrics', e);
+            return false;
+        }
+    }
 }
 
 export const lyricsService = new LyricsService();
