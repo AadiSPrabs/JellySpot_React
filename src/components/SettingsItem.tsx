@@ -38,6 +38,6 @@ export default function SettingsItem({ title, description, icon, right, onPress,
 
 const styles = StyleSheet.create({
     item: {
-        paddingVertical: 4,
+        paddingVertical: 12,
     }
 });

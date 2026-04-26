@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, Vibration, TouchableOpacity, useWindowDimensions, RefreshControl, NativeScrollEvent, Platform } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Avatar, useTheme, IconButton, TextInput, Button, TouchableRipple } from 'react-native-paper';
+import { Text, Avatar, useTheme, IconButton, TextInput, Button, TouchableRipple, Portal, Dialog } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -35,9 +35,10 @@ interface PageProps {
     dataSource: 'local' | 'jellyfin';
     navigation: any;
     theme: any;
+    refreshCounter?: number;
 }
 
-const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, theme, navigation }: any) => {
+const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, theme, navigation, onLongPress }: any) => {
     const handleItemPress = (item: any) => {
         if (item.id === 'all-songs') {
             navigation.navigate('Detail', { itemId: 'all-songs', type: 'All Songs' });
@@ -64,6 +65,7 @@ const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, them
         return (
             <TouchableRipple
                 onPress={() => handleItemPress(item)}
+                onLongPress={onLongPress ? () => onLongPress(item) : undefined}
                 rippleColor="rgba(0, 0, 0, 0.3)"
                 style={{ width: cardWidth, margin: 4, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.colors.surfaceVariant }}
             >
@@ -90,6 +92,7 @@ const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, them
     return (
         <TouchableRipple
             onPress={() => handleItemPress(item)}
+            onLongPress={onLongPress ? () => onLongPress(item) : undefined}
             rippleColor="rgba(0, 0, 0, 0.3)"
             style={[styles.item, { borderRadius: 8, overflow: 'hidden' }]}
         >
@@ -107,10 +110,12 @@ const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, them
     );
 });
 
-const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme }: PageProps) => {
+const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme, refreshCounter }: PageProps) => {
     const [playlists, setPlaylists] = React.useState<any[]>([]);
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
+    const [selectedPlaylist, setSelectedPlaylist] = React.useState<any>(null);
+    const [isDeleteVisible, setIsDeleteVisible] = React.useState(false);
     const localLibrary = useLocalLibraryStore();
 
     const CACHE_TTL = 5 * 60 * 1000;
@@ -156,6 +161,36 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
         fetchPlaylists();
     }, [dataSource, localLibrary.playlists]);
 
+    React.useEffect(() => {
+        if (refreshCounter && refreshCounter > 0) {
+            fetchPlaylists(true);
+        }
+    }, [refreshCounter]);
+
+    const handleLongPress = React.useCallback((item: any) => {
+        if (item.id === 'all-songs' || item.id === 'liked-songs' || item.Type !== 'Playlist') return;
+        setSelectedPlaylist(item);
+        setIsDeleteVisible(true);
+    }, []);
+
+    const handleDeletePlaylist = async () => {
+        if (!selectedPlaylist) return;
+        const id = selectedPlaylist.Id || selectedPlaylist.id;
+        try {
+            if (dataSource === 'local') {
+                localLibrary.deletePlaylist(id);
+            } else {
+                await jellyfinApi.deleteItem(id);
+            }
+            (global as any).libraryCache[`playlists_${dataSource}`] = null;
+            fetchPlaylists(true);
+        } catch (error) {
+            console.error('Failed to delete playlist', error);
+        }
+        setIsDeleteVisible(false);
+        setSelectedPlaylist(null);
+    };
+
     const getStaticItems = () => {
         if (dataSource === 'local') {
             return [
@@ -175,7 +210,7 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
         <View style={{ width: pageWidth, flex: 1 }}>
             <FlashList
                 data={[...getStaticItems(), ...playlists]}
-                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
+                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} onLongPress={handleLongPress} />}
                 keyExtractor={(item) => (item.Id || item.id) + 'p'}
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
@@ -183,6 +218,18 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
                 ListEmptyComponent={<EmptyState icon="music-note-off" title="No Playlists found" description="Create a playlist to get started" />}
                 estimatedItemSize={64}
             />
+            
+            <ActionSheet visible={isDeleteVisible} onClose={() => setIsDeleteVisible(false)} title="Playlist Options" heightPercentage={25}>
+                <View style={{ padding: 16 }}>
+                    <Text variant="bodyLarge" style={{ marginBottom: 16, textAlign: 'center' }}>
+                        Delete "{selectedPlaylist?.Name || selectedPlaylist?.title}"?
+                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 16 }}>
+                        <Button mode="outlined" onPress={() => setIsDeleteVisible(false)} style={{ flex: 1 }}>Cancel</Button>
+                        <Button mode="contained" buttonColor={theme.colors.error} onPress={handleDeletePlaylist} style={{ flex: 1 }}>Delete</Button>
+                    </View>
+                </View>
+            </ActionSheet>
         </View>
     );
 });
@@ -329,6 +376,29 @@ export default function LibraryScreen() {
     const scrollX = useSharedValue(0);
     const pagerRef = React.useRef<Animated.ScrollView>(null);
     const [activeFilter, setActiveFilter] = React.useState<FilterType>('playlists');
+    
+    const [refreshCounter, setRefreshCounter] = React.useState(0);
+    const [isAddPlaylistVisible, setIsAddPlaylistVisible] = React.useState(false);
+    const [newPlaylistName, setNewPlaylistName] = React.useState('');
+    const localLibrary = useLocalLibraryStore();
+
+    const handleCreatePlaylist = async () => {
+        if (!newPlaylistName.trim()) return;
+        
+        try {
+            if (dataSource === 'local') {
+                localLibrary.createPlaylist(newPlaylistName.trim());
+            } else {
+                await jellyfinApi.createPlaylist(newPlaylistName.trim());
+            }
+            (global as any).libraryCache[`playlists_${dataSource}`] = null;
+            setRefreshCounter(prev => prev + 1);
+        } catch (error) {
+            console.error('Failed to create playlist', error);
+        }
+        setIsAddPlaylistVisible(false);
+        setNewPlaylistName('');
+    };
 
     const scrollHandler = useAnimatedScrollHandler({
         onScroll: (event) => {
@@ -378,7 +448,7 @@ export default function LibraryScreen() {
                 </TouchableOpacity>
                 <Text variant={isLandscape ? "titleMedium" : "headlineSmall"} style={styles.headerTitle}>Your Library</Text>
                 {activeFilter === 'playlists' && (
-                    <IconButton icon="plus" onPress={() => { }} style={{ margin: 0 }} />
+                    <IconButton icon="plus" onPress={() => setIsAddPlaylistVisible(true)} style={{ margin: 0 }} />
                 )}
             </View>
 
@@ -411,10 +481,29 @@ export default function LibraryScreen() {
                 decelerationRate="fast"
                 removeClippedSubviews={true}
             >
-                <PlaylistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
+                <PlaylistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} refreshCounter={refreshCounter} />
                 <ArtistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
                 <AlbumPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
             </Animated.ScrollView>
+
+            <Portal>
+                <Dialog visible={isAddPlaylistVisible} onDismiss={() => setIsAddPlaylistVisible(false)} style={{ backgroundColor: theme.colors.surfaceVariant }}>
+                    <Dialog.Title>New Playlist</Dialog.Title>
+                    <Dialog.Content>
+                        <TextInput
+                            label="Playlist Name"
+                            value={newPlaylistName}
+                            onChangeText={setNewPlaylistName}
+                            mode="outlined"
+                            autoFocus
+                        />
+                    </Dialog.Content>
+                    <Dialog.Actions>
+                        <Button onPress={() => setIsAddPlaylistVisible(false)}>Cancel</Button>
+                        <Button onPress={handleCreatePlaylist} disabled={!newPlaylistName.trim()}>Create</Button>
+                    </Dialog.Actions>
+                </Dialog>
+            </Portal>
         </SafeAreaView>
     );
 }
@@ -429,8 +518,8 @@ const styles = StyleSheet.create({
     tabText: { color: 'rgba(255, 255, 255, 0.6)', fontSize: 14 },
     activeIndicator: { position: 'absolute', bottom: -1, height: 3, borderRadius: 2 },
     listContent: { paddingBottom: 140 },
-    item: { paddingVertical: 8 },
-    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+    item: { marginVertical: 2 },
+    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4 },
     itemTextContainer: { marginLeft: 16, flex: 1, justifyContent: 'center' },
     avatarContainer: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center' },
 });

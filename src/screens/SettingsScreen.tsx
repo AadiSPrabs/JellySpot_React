@@ -101,42 +101,36 @@ export default function SettingsScreen() {
                 <SettingsGroup title="General">
                     <SettingsItem
                         title="Appearance"
-                        description="Colors, Player Background"
                         icon="palette"
                         onPress={() => navigation.navigate('Appearance' as any)}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Listening Tracker"
-                        description="View your listening habits & stats"
                         icon="chart-bar"
                         onPress={() => navigation.navigate('Stats' as any)}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Playback"
-                        description="Audio Quality, Crossfade, Speed"
                         icon="play-circle-outline"
                         onPress={() => navigation.navigate('PlaybackSettings' as any)}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Storage"
-                        description="Local music folder"
                         icon="folder-music"
                         onPress={() => navigation.navigate('StorageSettings' as any)}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Music Sources"
-                        description="Jellyfin, Local, or Both"
                         icon="music-box-multiple"
                         onPress={() => navigation.navigate('SourceModeSettings' as any)}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Downloads"
-                        description="Offline storage, network settings"
                         icon="download"
                         onPress={() => navigation.navigate('DownloadSettings' as any)}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
@@ -146,7 +140,6 @@ export default function SettingsScreen() {
                 <SettingsGroup title="Backup & Restore">
                     <SettingsItem
                         title="Export Backup"
-                        description="Save settings, playlists & favorites"
                         icon="export"
                         onPress={handleExport}
                         disabled={isExporting}
@@ -154,7 +147,6 @@ export default function SettingsScreen() {
                     />
                     <SettingsItem
                         title="Import Backup"
-                        description="Restore from a backup file"
                         icon="import"
                         onPress={handleImport}
                         disabled={isImporting}
@@ -164,13 +156,11 @@ export default function SettingsScreen() {
 
                 <SettingsGroup title="About">
                     <SettingsItem
-                        title="Version"
-                        description="1.1.0"
+                        title="Version 1.1.1"
                         icon="information-outline"
                     />
                     <SettingsItem
                         title="GitHub Repository"
-                        description="View source code"
                         icon="github"
                         onPress={() => Linking.openURL('https://github.com/AadiSPrabs/JellySpot_React')}
                         right={() => <MaterialCommunityIcons name="open-in-new" size={20} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}

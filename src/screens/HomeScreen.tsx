@@ -1136,6 +1136,7 @@ export default function HomeScreen() {
                 imageUrl={imageUrl}
                 onPress={() => dataSource === 'local' ? handleSongPress(item) : handleItemPress(item)}
                 style={[
+                    !isLandscape && styles.card,
                     isLandscape && {
                         width: gridItemWidth,
                         marginRight: 8,
@@ -1225,12 +1226,13 @@ export default function HomeScreen() {
                                 heightPercentage={40}
                             >
                                 <View style={{ gap: 4 }}>
-                                    <List.Item
-                                        title="Download Selected"
-                                        left={props => <List.Icon {...props} icon="download" />}
-                                        onPress={handleDownloadSelected}
-                                        disabled={dataSource === 'local'}
-                                    />
+                                    {dataSource !== 'local' && (
+                                        <List.Item
+                                            title="Download Selected"
+                                            left={props => <List.Icon {...props} icon="download" />}
+                                            onPress={handleDownloadSelected}
+                                        />
+                                    )}
                                     <List.Item
                                         title="Add to Playlist"
                                         left={props => <List.Icon {...props} icon="playlist-plus" />}
@@ -1453,7 +1455,7 @@ export default function HomeScreen() {
                     {/* ====== 9. Fresh Arrivals / Recently Added ====== */}
                     {latestMusic.length > 0 ? (
                         <View style={styles.section}>
-                            {renderSectionHeader(dataSource === 'local' ? 'Recently Added' : 'Fresh Arrivals')}
+                            {renderSectionHeader('Recently Added')}
                             {isLandscape ? (
                                 <View style={[styles.listContent, { flexDirection: 'row', flexWrap: 'wrap' }]}>
                                     {latestMusic.map((item) => (

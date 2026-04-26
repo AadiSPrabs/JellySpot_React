@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, StyleSheet, ScrollView, useWindowDimensions, Animated } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, Animated, Modal } from 'react-native';
 import { Text, Button, useTheme, Surface, TouchableRipple } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSettingsStore, SourceMode } from '../store/settingsStore';
@@ -8,6 +8,7 @@ import { Server, Smartphone, Check } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { jellyfinApi } from '../api/jellyfin';
 import { ActivityIndicator, TextInput } from 'react-native-paper';
+import { useLocalLibraryStore } from '../store/localLibraryStore';
 
 interface SourceCardProps {
     title: string;
@@ -91,9 +92,15 @@ export default function OnboardingScreen() {
     const [isConnected, setIsConnected] = useState(false);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [error, setError] = useState('');
+
+    // Quick Connect State
+    const [qcCode, setQcCode] = useState('');
+    const [showQcModal, setShowQcModal] = useState(false);
+    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // Library Selection State
     const [libraries, setLibraries] = useState<any[]>([]);
@@ -102,6 +109,7 @@ export default function OnboardingScreen() {
 
     const { selectedJellyfinLibraries, setSelectedJellyfinLibraries } = useSettingsStore();
     const { login, setServerUrl: setAuthServerUrl } = useAuthStore();
+    const localLibraryStore = useLocalLibraryStore();
 
     const canContinue = jellyfinSelected || localSelected;
 
@@ -200,6 +208,61 @@ export default function OnboardingScreen() {
         }
     };
 
+    const handleStartQuickConnect = async () => {
+        setIsLoggingIn(true);
+        setError('');
+        try {
+            const data = await jellyfinApi.initiateQuickConnect();
+            setQcCode(data.Code);
+            setShowQcModal(true);
+            startPolling(data.Secret);
+        } catch (err) {
+            console.error(err);
+            setError('Failed to initiate Quick Connect.');
+        } finally {
+            setIsLoggingIn(false);
+        }
+    };
+
+    const startPolling = (secret: string) => {
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = setInterval(async () => {
+            try {
+                const response = await jellyfinApi.checkQuickConnect(secret);
+                if (response.Authenticated) {
+                    clearInterval(pollIntervalRef.current!);
+                    pollIntervalRef.current = null;
+                    try {
+                        const authResult = await jellyfinApi.authenticateWithQuickConnect(secret);
+                        login({
+                            id: authResult.User.Id,
+                            name: authResult.User.Name,
+                            token: authResult.AccessToken
+                        });
+                        setIsAuthenticated(true);
+                        setShowQcModal(false);
+                        handleNextStep(true);
+                    } catch (fetchError) {
+                        console.error("QC Auth Error:", fetchError);
+                        setError(`Quick Connect failed.\n\nError: ${fetchError}`);
+                        setShowQcModal(false);
+                    }
+                }
+            } catch (e) {}
+        }, 2000);
+    };
+
+    const handleCancelQc = () => {
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        setShowQcModal(false);
+    };
+
+    React.useEffect(() => {
+        return () => {
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        };
+    }, []);
+
     const fetchLibraries = async () => {
         setIsLoadingLibraries(true);
         setError('');
@@ -231,7 +294,19 @@ export default function OnboardingScreen() {
         setSelectedJellyfinLibraries(Array.from(next));
     };
 
-    const handleFinish = () => {
+    const handleFinish = async () => {
+        if (localSelected) {
+            try {
+                const granted = await localLibraryStore.requestPermissions();
+                if (granted) {
+                    // Start background scan
+                    localLibraryStore.refreshLibrary();
+                }
+            } catch (e) {
+                console.error("Failed to request local storage permission during onboarding", e);
+            }
+        }
+
         let mode: SourceMode;
         if (jellyfinSelected && localSelected) {
             mode = 'both';
@@ -386,8 +461,14 @@ export default function OnboardingScreen() {
                                             value={password}
                                             onChangeText={setPassword}
                                             mode="outlined"
-                                            secureTextEntry
+                                            secureTextEntry={!showPassword}
                                             disabled={isLoggingIn}
+                                            right={
+                                                <TextInput.Icon
+                                                    icon={showPassword ? "eye-off" : "eye"}
+                                                    onPress={() => setShowPassword(!showPassword)}
+                                                />
+                                            }
                                         />
 
                                         <Button
@@ -397,6 +478,15 @@ export default function OnboardingScreen() {
                                             disabled={isLoggingIn || !username || !password}
                                         >
                                             Login
+                                        </Button>
+
+                                        <Button
+                                            mode="outlined"
+                                            onPress={handleStartQuickConnect}
+                                            disabled={isLoggingIn}
+                                            style={{ marginTop: 8 }}
+                                        >
+                                            Quick Connect
                                         </Button>
 
                                         <Button
@@ -525,6 +615,29 @@ export default function OnboardingScreen() {
                     </Button>
                 )}
             </View>
+
+            {/* Quick Connect Modal */}
+            <Modal visible={showQcModal} animationType="slide" transparent>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 }}>
+                    <View style={{ backgroundColor: theme.colors.surface, borderRadius: 12, padding: 30, alignItems: 'center' }}>
+                        <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, marginBottom: 10, fontWeight: 'bold' }}>Quick Connect</Text>
+                        <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', marginBottom: 20 }}>
+                            Enter this code in your Jellyfin dashboard or Quick Connect page:
+                        </Text>
+
+                        <Text variant="displayMedium" style={{ color: theme.colors.primary, fontWeight: 'bold', letterSpacing: 4, marginBottom: 30 }}>
+                            {qcCode}
+                        </Text>
+
+                        <ActivityIndicator size="small" color={theme.colors.secondary} style={{ marginBottom: 20 }} />
+                        <Text variant="bodySmall" style={{ color: theme.colors.outline }}>Waiting for authorization...</Text>
+
+                        <Button mode="text" onPress={handleCancelQc} style={{ marginTop: 20 }}>
+                            Cancel
+                        </Button>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
