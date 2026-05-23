@@ -2,6 +2,7 @@ import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logError, isNotFoundError, getErrorMessage } from '../utils/errorUtils';
 
 // Unique device ID (generated once, persisted forever)
 let cachedDeviceId: string | null = null;
@@ -56,30 +57,28 @@ const getAuthHeaderAsync = async (token?: string): Promise<string> => {
 // Module-level singleton Axios instance
 let apiClient: ReturnType<typeof axios.create> | null = null;
 let lastServerUrl: string | null = null;
-let lastToken: string | null = null;
 
 const getApiClient = () => {
-    const { serverUrl, user } = useAuthStore.getState();
-    const token = user?.token || '';
+    const { serverUrl } = useAuthStore.getState();
 
-    // Reuse existing client if auth state hasn't changed
-    if (apiClient && lastServerUrl === serverUrl && lastToken === token) {
+    // Reuse existing client if server URL hasn't changed
+    // Token is fetched fresh on every request via the interceptor
+    if (apiClient && lastServerUrl === serverUrl) {
         return apiClient;
     }
 
     apiClient = axios.create({
-        baseURL: serverUrl || '',
+        baseURL: serverUrl || undefined,
     });
 
+    // Add auth header on every request using the LATEST token from store
     apiClient.interceptors.request.use(async (config) => {
-        // Use the token from the closure when the client was requested, or fetch latest
-        const currentToken = useAuthStore.getState().user?.token || token;
+        const currentToken = useAuthStore.getState().user?.token || '';
         config.headers['X-Emby-Authorization'] = await getAuthHeaderAsync(currentToken);
         return config;
     });
 
     lastServerUrl = serverUrl;
-    lastToken = token;
 
     return apiClient;
 };
@@ -409,10 +408,10 @@ export const jellyfinApi = {
 
                 return response.data;
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Ignore 404 (Not Found) - expected if no lyrics or older server
-            if (e.response?.status !== 404) {
-                console.warn('[Jellyfin] /Audio Lyrics endpoint failed:', e.message);
+            if (!isNotFoundError(e)) {
+                logError('Jellyfin', `/Audio Lyrics endpoint failed: ${getErrorMessage(e)}`);
             }
         }
 
@@ -423,9 +422,9 @@ export const jellyfinApi = {
 
                 return response.data;
             }
-        } catch (e: any) {
-            if (e.response?.status !== 404) {
-                console.warn('[Jellyfin] /Items Lyrics endpoint failed:', e.message);
+        } catch (e: unknown) {
+            if (!isNotFoundError(e)) {
+                logError('Jellyfin', `/Items Lyrics endpoint failed: ${getErrorMessage(e)}`);
             }
         }
 
@@ -447,7 +446,7 @@ export const jellyfinApi = {
             // No embedded lyrics in item details - return null
 
         } catch (e) {
-            console.warn('[Jellyfin] Item details fetch failed:', e);
+            logError('Jellyfin', `Item details fetch failed: ${getErrorMessage(e)}`);
         }
 
         return null; // No lyrics found
@@ -595,7 +594,7 @@ export const jellyfinApi = {
         try {
             await api.post('/Sessions/Capabilities', capabilities);
         } catch (e) {
-            console.warn('[API] reportCapabilities failure:', e);
+            logError('API', `reportCapabilities failure: ${getErrorMessage(e)}`);
         }
 
         return true;

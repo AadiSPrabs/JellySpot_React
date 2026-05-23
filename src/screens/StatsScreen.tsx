@@ -26,7 +26,7 @@ function formatDuration(totalMinutes: number): { value: string; unit: string } {
     return { value: `${days}d ${remHours}h`, unit: '' };
 }
 
-export default function StatsScreen() {
+const StatsScreen = React.memo(function StatsScreen() {
     const theme = useTheme();
     const { dataSource } = useSettingsStore();
     const navigation = useNavigation();
@@ -301,7 +301,9 @@ export default function StatsScreen() {
             </ScrollView>
         </SafeAreaView>
     );
-}
+});
+
+export default StatsScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -423,3 +425,4 @@ const styles = StyleSheet.create({
         paddingVertical: 60,
     },
 });
+

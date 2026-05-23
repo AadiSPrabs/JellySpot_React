@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, useWindowDimensions, Platform, Pressable } from 'react-native';
+import { View, StyleSheet, Platform, Pressable } from 'react-native';
 import { createBottomTabNavigator, BottomTabBar, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useDebouncedDimensions } from '../hooks/useDebouncedDimensions';
 import { MainTabParamList, HomeStackParamList, SearchStackParamList, LibraryStackParamList, DownloadsStackParamList } from '../types/navigation';
 import HomeScreen from '../screens/HomeScreen';
 import SearchScreen from '../screens/SearchScreen';
@@ -210,7 +211,7 @@ function DownloadsStackNavigator() {
 
 export default function MainNavigator() {
     const theme = useTheme();
-    const { width, height } = useWindowDimensions();
+    const { width, height } = useDebouncedDimensions();
     const isLandscape = width > height;
     const { sourceMode, dataSource } = useSettingsStore();
     const safeInsets = useSafeAreaInsets();

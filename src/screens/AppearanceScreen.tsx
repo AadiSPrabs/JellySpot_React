@@ -25,7 +25,7 @@ const BACKGROUND_OPTIONS: { label: string; value: BackgroundType; description: s
     { label: 'Dominant Color', value: 'dominant', description: 'Static gradient from artwork colors' },
 ];
 
-export default function AppearanceScreen() {
+const AppearanceScreen = React.memo(function AppearanceScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
     const { backgroundType, themeColor, isAmoledMode, setBackgroundType, setThemeColor, setAmoledMode } = useSettingsStore(useShallow(state => ({
@@ -101,7 +101,9 @@ export default function AppearanceScreen() {
             </ScrollView>
         </SafeAreaView>
     );
-}
+});
+
+export default AppearanceScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -150,3 +152,4 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
 });
+

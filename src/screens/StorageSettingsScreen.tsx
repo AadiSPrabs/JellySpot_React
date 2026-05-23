@@ -20,7 +20,7 @@ interface StorageStats {
     isCalculating: boolean;
 }
 
-export default function StorageSettingsScreen() {
+const StorageSettingsScreen = React.memo(function StorageSettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
     const {
@@ -471,7 +471,9 @@ export default function StorageSettingsScreen() {
 
         </SafeAreaView>
     );
-}
+});
+
+export default StorageSettingsScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -545,3 +547,4 @@ const styles = StyleSheet.create({
         marginRight: 12,
     },
 });
+

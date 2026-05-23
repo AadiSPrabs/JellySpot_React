@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { View, StyleSheet, FlatList, RefreshControl, ScrollView, Animated, TouchableOpacity, Alert, Pressable, useWindowDimensions, LayoutAnimation, Platform, UIManager, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, FlatList, RefreshControl, ScrollView, Animated, TouchableOpacity, Alert, Pressable, LayoutAnimation, Platform, UIManager, ActivityIndicator, InteractionManager } from 'react-native';
+import { useDebouncedDimensions } from '../hooks/useDebouncedDimensions';
 import { Image } from 'expo-image';
 import { Text, Card, Avatar, useTheme, IconButton, Button, Surface, Portal, Dialog, TextInput, List } from 'react-native-paper';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
@@ -89,7 +90,7 @@ const getQuirkySubtitle = (): string => {
 // Track if animation has played globally (persists across re-renders and HMR)
 const animationState = { hasPlayed: false };
 
-export default function HomeScreen() {
+const HomeScreen = React.memo(function HomeScreen() {
     const [latestMusic, setLatestMusic] = useState<MediaItem[]>([]);
     const [resumeItems, setResumeItems] = useState<MediaItem[]>([]);
     const [glowColor, setGlowColor] = useState<string | null>(null);
@@ -135,7 +136,7 @@ export default function HomeScreen() {
         localProfile: state.localProfile,
         setLocalProfile: state.setLocalProfile
     })));
-    const { width, height } = useWindowDimensions();
+    const { width, height } = useDebouncedDimensions();
     const isLandscape = width > height;
 
     const columnCardWidth = (width - LEFT_BAR_WIDTH - 48) / 3 - 10;
@@ -645,43 +646,39 @@ export default function HomeScreen() {
         });
     }, []);
 
-    // Extract dominant color for ambient glow
+    // Extract dominant color for ambient glow (deferred to not block first paint)
     useEffect(() => {
-        let isCancelled = false;
         if (!currentTrack?.imageUrl) {
             setGlowColor(null);
             return;
         }
 
-        const fetchGlowColor = async () => {
-            try {
-                const colors = await getColors(currentTrack.imageUrl, {
-                    fallback: theme.colors.primary,
-                    cache: true,
-                    key: currentTrack.imageUrl,
-                });
-
-                if (!isCancelled) {
-                    let selectedColor: string | undefined;
-                    if (colors.platform === 'android') {
-                        selectedColor = colors.dominant || colors.vibrant || theme.colors.primary;
-                    } else if (colors.platform === 'ios') {
-                        selectedColor = colors.primary || colors.background || theme.colors.primary;
-                    }
-
-                    if (selectedColor) {
-                        // Brighten the color by 30% for a better "glow" effect as requested
-                        setGlowColor(lightenHexColor(selectedColor, 0.3));
-                    }
+        let isCancelled = false;
+        const handle = InteractionManager.runAfterInteractions(() => {
+            if (isCancelled) return;
+            getColors(currentTrack.imageUrl!, {
+                fallback: theme.colors.primary,
+                cache: true,
+                key: currentTrack.imageUrl,
+            }).then(colors => {
+                if (isCancelled) return;
+                let selectedColor: string | undefined;
+                if (colors.platform === 'android') {
+                    selectedColor = colors.dominant || colors.vibrant || theme.colors.primary;
+                } else if (colors.platform === 'ios') {
+                    selectedColor = colors.primary || colors.background || theme.colors.primary;
                 }
-            } catch (err) {
+
+                if (selectedColor) {
+                    setGlowColor(lightenHexColor(selectedColor, 0.3));
+                }
+            }).catch(err => {
                 console.warn('HomeScreen glow color extraction failed:', err);
                 if (!isCancelled) setGlowColor(null);
-            }
-        };
+            });
+        });
 
-        fetchGlowColor();
-        return () => { isCancelled = true; };
+        return () => { isCancelled = true; handle.cancel(); };
     }, [currentTrack?.imageUrl, theme.colors.primary]);
 
     const onRefresh = React.useCallback(async () => {
@@ -1618,7 +1615,9 @@ export default function HomeScreen() {
             />
         </SafeAreaView >
     );
-}
+});
+
+export default HomeScreen;
 
 const styles = StyleSheet.create({
     container: {

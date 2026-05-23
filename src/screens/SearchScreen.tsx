@@ -31,7 +31,7 @@ const GENRE_COLORS = [
     ['#509BF5', '#284D7A'], // Light Blue
 ];
 
-export default function SearchScreen() {
+const SearchScreen = React.memo(function SearchScreen() {
     const theme = useTheme();
     const navigation = useNavigation<NativeStackNavigationProp<SearchStackParamList>>();
     const playTrack = usePlayerStore((state) => state.playTrack);
@@ -577,7 +577,9 @@ export default function SearchScreen() {
             />
         </SafeAreaView>
     );
-}
+});
+
+export default SearchScreen;
 
 const styles = StyleSheet.create({
     container: {

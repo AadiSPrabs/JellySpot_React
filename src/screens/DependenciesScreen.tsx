@@ -57,7 +57,7 @@ const dependencies: Dependency[] = [
     { name: 'zustand', github: 'https://github.com/pmndrs/zustand' },
 ];
 
-export default function DependenciesScreen() {
+const DependenciesScreen = React.memo(function DependenciesScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
 
@@ -94,7 +94,9 @@ export default function DependenciesScreen() {
             </ScrollView>
         </SafeAreaView>
     );
-}
+});
+
+export default DependenciesScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -110,3 +112,4 @@ const styles = StyleSheet.create({
         paddingBottom: 24,
     },
 });
+

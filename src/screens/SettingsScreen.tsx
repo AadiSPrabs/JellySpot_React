@@ -15,7 +15,7 @@ import SettingsGroup from '../components/SettingsGroup';
 import SettingsItem from '../components/SettingsItem';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-export default function SettingsScreen() {
+const SettingsScreen = React.memo(function SettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
     const { user, serverUrl } = useAuthStore(useShallow(state => ({
@@ -102,37 +102,37 @@ export default function SettingsScreen() {
                     <SettingsItem
                         title="Appearance"
                         icon="palette"
-                        onPress={() => navigation.navigate('Appearance' as any)}
+                        onPress={() => navigation.navigate('Appearance')}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Listening Tracker"
                         icon="chart-bar"
-                        onPress={() => navigation.navigate('Stats' as any)}
+                        onPress={() => navigation.navigate('Stats')}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Playback"
                         icon="play-circle-outline"
-                        onPress={() => navigation.navigate('PlaybackSettings' as any)}
+                        onPress={() => navigation.navigate('PlaybackSettings')}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Storage"
                         icon="folder-music"
-                        onPress={() => navigation.navigate('StorageSettings' as any)}
+                        onPress={() => navigation.navigate('StorageSettings')}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Music Sources"
                         icon="music-box-multiple"
-                        onPress={() => navigation.navigate('SourceModeSettings' as any)}
+                        onPress={() => navigation.navigate('SourceModeSettings')}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                     <SettingsItem
                         title="Downloads"
                         icon="download"
-                        onPress={() => navigation.navigate('DownloadSettings' as any)}
+                        onPress={() => navigation.navigate('DownloadSettings')}
                         right={() => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={{ alignSelf: 'center', marginRight: 16 }} />}
                     />
                 </SettingsGroup>
@@ -188,7 +188,9 @@ export default function SettingsScreen() {
             </Snackbar>
         </SafeAreaView >
     );
-}
+});
+
+export default SettingsScreen;
 
 const styles = StyleSheet.create({
     container: {

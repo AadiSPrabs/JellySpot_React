@@ -7,11 +7,14 @@ import { PaperProvider } from 'react-native-paper';
 import { theme } from './src/theme/theme';
 
 import { useSettingsStore } from './src/store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { darkenColor, lightenHexColor } from './src/utils/colorUtils';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 function AppContent() {
-  const { themeColor, isAmoledMode } = useSettingsStore();
+  const { themeColor, isAmoledMode } = useSettingsStore(
+    useShallow(s => ({ themeColor: s.themeColor, isAmoledMode: s.isAmoledMode }))
+  );
 
   // Use the shared colorUtils instead of duplicated helpers
   const darkenHex = (hex: string, factor: number): string => {

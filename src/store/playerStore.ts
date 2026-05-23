@@ -8,6 +8,7 @@ import { DatabaseService } from '../services/DatabaseService';
 import * as Network from 'expo-network';
 import { AppState } from 'react-native';
 import { Track } from '../types/track';
+import { logError, getErrorMessage } from '../utils/errorUtils';
 
 // Re-export Track for consumers already importing from playerStore
 export type { Track } from '../types/track';
@@ -88,7 +89,7 @@ const getEffectiveAudioQuality = async (): Promise<'lossless' | 'high' | 'low'> 
         cachedNetworkState = { quality, timestamp: now };
         return quality;
     } catch (error) {
-        console.warn('Failed to detect network type:', error);
+        logError('PlayerStore', `Failed to detect network type: ${getErrorMessage(error)}`);
         return 'lossless'; // Fallback to lossless
     }
 };
@@ -270,7 +271,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
                         await TrackPlayer.remove(indicesToRemove);
                     }
                 } catch (e) {
-                    console.warn('[PlayerStore] Failed to prune native queue:', e);
+                    logError('PlayerStore', `Failed to prune native queue: ${getErrorMessage(e)}`);
                 }
 
                 // Capture the previous track's listen duration BEFORE resetting
@@ -591,9 +592,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             }
 
             persistQueueState();
-        } catch (error: any) {
-            console.error('Failed to play track:', error);
-            set({ playbackError: error.message || 'Failed to start playback', isPlaying: false });
+        } catch (error: unknown) {
+            const msg = getErrorMessage(error);
+            logError('PlayerStore', `Failed to play track: ${msg}`);
+            set({ playbackError: msg, isPlaying: false });
         }
     },
 
@@ -824,7 +826,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         }
 
         if (targetIndex === currentIndex) {
-            await seek(0);
+            await get().seek(0);
             return;
         }
 

@@ -364,7 +364,7 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, 
     );
 });
 
-export default function LibraryScreen() {
+const LibraryScreen = React.memo(function LibraryScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
     const theme = useTheme();
     const user = useAuthStore((state) => state.user);
@@ -506,7 +506,9 @@ export default function LibraryScreen() {
             </Portal>
         </SafeAreaView>
     );
-}
+});
+
+export default LibraryScreen;
 
 const styles = StyleSheet.create({
     container: { flex: 1 },

@@ -8,7 +8,7 @@ import Slider from '@react-native-community/slider';
 import SettingsGroup from '../components/SettingsGroup';
 import SettingsItem from '../components/SettingsItem';
 
-export default function PlaybackSettingsScreen() {
+const PlaybackSettingsScreen = React.memo(function PlaybackSettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
     const {
@@ -149,7 +149,9 @@ export default function PlaybackSettingsScreen() {
             </ScrollView>
         </SafeAreaView>
     );
-}
+});
+
+export default PlaybackSettingsScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -165,3 +167,4 @@ const styles = StyleSheet.create({
         paddingBottom: 40,
     },
 });
+

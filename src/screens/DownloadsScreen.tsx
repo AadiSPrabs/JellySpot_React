@@ -14,7 +14,7 @@ interface AlbumGroup {
     isExpanded: boolean;
 }
 
-export default function DownloadsScreen() {
+const DownloadsScreen = React.memo(function DownloadsScreen() {
     const theme = useTheme();
     const { downloads, loadDownloads, removeDownload, clearCompleted, retryDownload, cancelAllPending } = useDownloadStore();
     const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
@@ -316,7 +316,9 @@ export default function DownloadsScreen() {
             )}
         </SafeAreaView>
     );
-}
+});
+
+export default DownloadsScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -405,3 +407,4 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
 });
+

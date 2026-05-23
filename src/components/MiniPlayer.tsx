@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useLayoutEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, TouchableOpacity, Animated, Dimensions, useWindowDimensions, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Animated, Dimensions, useWindowDimensions, ActivityIndicator, InteractionManager } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import { usePlayerStore } from '../store/playerStore';
@@ -147,10 +147,18 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
         }
     }, [currentTrack]);
 
-    // Extract color for the liquid progress bar
+    // Extract color for the liquid progress bar (deferred to not block UI)
     useEffect(() => {
-        if (currentTrack?.imageUrl) {
-            ImageColors.getColors(currentTrack.imageUrl, {
+        if (!currentTrack?.imageUrl) {
+            setMiniPlayerColor(theme.colors.primary);
+            return;
+        }
+
+        // Set fallback immediately, defer expensive color extraction
+        setMiniPlayerColor(theme.colors.primary);
+
+        const handle = InteractionManager.runAfterInteractions(() => {
+            ImageColors.getColors(currentTrack.imageUrl!, {
                 fallback: theme.colors.primary,
                 cache: true,
                 key: currentTrack.id,
@@ -160,11 +168,11 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                 } else if (colors.platform === 'ios') {
                     setMiniPlayerColor(colors.primary || colors.background || theme.colors.primary);
                 }
-            }).catch(() => setMiniPlayerColor(theme.colors.primary));
-        } else {
-            setMiniPlayerColor(theme.colors.primary);
-        }
-    }, [currentTrack?.id]);
+            }).catch(() => { /* keep default */ });
+        });
+
+        return () => handle.cancel();
+    }, [theme.colors.primary, currentTrack?.id, currentTrack?.imageUrl]);
 
     // Gesture Handling - Using RNGH to play nicely with GlobalPlayer's gestures
     const panGesture = useMemo(() => {

@@ -59,7 +59,7 @@ interface PlayerScreenProps {
     isGlobal?: boolean;
 }
 
-export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
+const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Select specific fields to avoid re-rendering on positionMillis updates
     const { currentTrack, isPlaying, isBuffering, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
@@ -1327,7 +1327,9 @@ export default function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
             </Portal>
         </View >
     );
-}
+});
+
+export default PlayerScreen;
 
 const styles = StyleSheet.create({
     container: {

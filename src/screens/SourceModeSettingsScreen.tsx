@@ -16,7 +16,7 @@ interface MusicLibrary {
     CollectionType?: string;
 }
 
-export default function SourceModeSettingsScreen() {
+const SourceModeSettingsScreen = React.memo(function SourceModeSettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
     const { sourceMode, setSourceMode, setDataSource, selectedJellyfinLibraries, setSelectedJellyfinLibraries } = useSettingsStore(useShallow(state => ({
@@ -588,7 +588,9 @@ export default function SourceModeSettingsScreen() {
 
         </SafeAreaView>
     );
-}
+});
+
+export default SourceModeSettingsScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -672,3 +674,4 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
 });
+

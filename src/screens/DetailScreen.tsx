@@ -32,7 +32,7 @@ type DetailScreenRouteProp = RouteProp<HomeStackParamList, 'Detail'>;
 
 import { Alert, RefreshControl } from 'react-native';
 
-export default function DetailScreen() {
+const DetailScreen = React.memo(function DetailScreen() {
     const route = useRoute<DetailScreenRouteProp>();
     const navigation = useNavigation();
     const { itemId, type } = route.params;
@@ -54,6 +54,28 @@ export default function DetailScreen() {
     // SIMPLE IN-MEMORY CACHE FOR DETAIL SCREENS
     // Key: itemId, Value: { item, tracks, artistAlbums, similarArtists, timestamp }
     const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    const MAX_CACHE_ENTRIES = 30; // Prevent unbounded memory growth
+
+    // Evict expired entries and enforce max cache size
+    const evictCache = () => {
+        const cache = (global as any).detailCache;
+        if (!cache) return;
+        const now = Date.now();
+        const entries = Object.entries(cache) as [string, any][];
+        
+        // Remove expired entries
+        let valid = entries.filter(([_, v]) => now - v.timestamp < CACHE_TTL);
+        
+        // If still over limit, keep only the most recent MAX_CACHE_ENTRIES
+        if (valid.length > MAX_CACHE_ENTRIES) {
+            valid.sort((a, b) => b[1].timestamp - a[1].timestamp);
+            valid = valid.slice(0, MAX_CACHE_ENTRIES);
+        }
+        
+        // Rebuild cache with only valid entries
+        (global as any).detailCache = Object.fromEntries(valid);
+    };
+
     const getCachedData = (id: string) => {
         const cached = (global as any).detailCache?.[id];
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -65,6 +87,8 @@ export default function DetailScreen() {
     const setCachedData = (id: string, data: any) => {
         if (!(global as any).detailCache) (global as any).detailCache = {};
         (global as any).detailCache[id] = { ...data, timestamp: Date.now() };
+        // Evict old entries every time we set new data (amortized O(1))
+        evictCache();
     };
 
     const clearCachedData = (id: string) => {
@@ -1636,7 +1660,9 @@ export default function DetailScreen() {
 
         </View>
     );
-}
+});
+
+export default DetailScreen;
 
 const styles = StyleSheet.create({
     container: {

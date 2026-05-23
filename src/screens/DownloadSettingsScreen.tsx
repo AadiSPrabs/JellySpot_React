@@ -18,7 +18,7 @@ const CONCURRENT_OPTIONS = [
     { label: '5 simultaneous', value: 5 },
 ];
 
-export default function DownloadSettingsScreen() {
+const DownloadSettingsScreen = React.memo(function DownloadSettingsScreen() {
     const theme = useTheme();
     const navigation = useNavigation();
     const { width, height } = useWindowDimensions();
@@ -219,7 +219,9 @@ export default function DownloadSettingsScreen() {
             />
         </>
     );
-}
+});
+
+export default DownloadSettingsScreen;
 
 const styles = StyleSheet.create({
     container: {
@@ -255,3 +257,4 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
 });
+
