@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, Platform } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -29,10 +29,14 @@ export default function GlobalPlayer() {
 
     const { width, height: SCREEN_HEIGHT } = useWindowDimensions();
     const isLandscape = width > SCREEN_HEIGHT;
+    const safeInsets = useSafeAreaInsets();
+    
+    // Fallback for Android 3-button navigation if insets are not reported correctly
+    const bottomInset = Platform.OS === 'android' && safeInsets.bottom === 0 ? 48 : safeInsets.bottom;
 
     // Offset from the bottom for MiniPlayer
     // Tab bar is explicitly 90px in MainNavigator. So we sit perfectly spaced above it.
-    const BOTTOM_OFFSET = isLandscape ? 12 : 90 + 6;
+    const BOTTOM_OFFSET = isLandscape ? 12 : 90 + bottomInset + 6;
     const COLLAPSED_Y = SCREEN_HEIGHT - (MINIPLAYER_HEIGHT + BOTTOM_OFFSET);
     const EXPANDED_Y = 0;
 

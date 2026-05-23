@@ -46,21 +46,23 @@ const QueueItem = React.memo(({
     isActive,
     isCurrent,
     onPress,
-    onRemove
+    onRemove,
+    isDragging
 }: {
     item: any,
     drag: () => void,
     isActive: boolean,
     isCurrent: boolean,
     onPress: (item: any) => void,
-    onRemove: (id: string) => void
+    onRemove: (id: string) => void,
+    isDragging: boolean
 }) => {
     const theme = useTheme();
     const themeActiveColor = theme.colors.primary;
 
     return (
         <Swipeable
-            enabled={!isActive} // Disable swipe while dragging
+            enabled={!isDragging && !isActive} // Disable swipe while dragging
             renderRightActions={(progress, dragX) => <RightActions progress={progress} dragX={dragX} />}
             onSwipeableWillOpen={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -111,7 +113,8 @@ const QueueItem = React.memo(({
 }, (prev, next) => (
     prev.item.queueItemId === next.item.queueItemId &&
     prev.isActive === next.isActive &&
-    prev.isCurrent === next.isCurrent
+    prev.isCurrent === next.isCurrent &&
+    prev.isDragging === next.isDragging
 ));
 
 export default function QueueScreen() {
@@ -134,6 +137,7 @@ export default function QueueScreen() {
 
     const themeActiveColor = theme.colors.primary;
     const [listReady, setListReady] = React.useState(false);
+    const [isDragging, setIsDragging] = React.useState(false);
 
     // Initial scroll to current track
     useEffect(() => {
@@ -172,8 +176,9 @@ export default function QueueScreen() {
             isCurrent={item.id === currentTrackId}
             onPress={playTrack}
             onRemove={removeFromQueue}
+            isDragging={isDragging}
         />
-    ), [currentTrackId, playTrack, removeFromQueue]);
+    ), [currentTrackId, playTrack, removeFromQueue, isDragging]);
 
     const handleDragEnd = useCallback(({ from, to }: { from: number, to: number }) => {
         if (from === to) return;
@@ -238,7 +243,11 @@ export default function QueueScreen() {
                     data={queue}
                     renderItem={renderItem}
                     keyExtractor={keyExtractor}
-                    onDragEnd={handleDragEnd}
+                    onDragBegin={() => setIsDragging(true)}
+                    onDragEnd={(params) => {
+                        setIsDragging(false);
+                        handleDragEnd(params);
+                    }}
                     contentContainerStyle={[
                         styles.listContent,
                         { opacity: listReady ? 1 : 0 }
@@ -247,7 +256,7 @@ export default function QueueScreen() {
                     initialNumToRender={15}
                     maxToRenderPerBatch={10}
                     windowSize={11} // Increased for smoother scrolling
-                    removeClippedSubviews={Platform.OS === 'android'}
+                    removeClippedSubviews={false}
                     getItemLayout={(data, index) => ({ length: 66, offset: 66 * index, index })}
                     activationDistance={15}
                     containerStyle={{ flex: 1 }}

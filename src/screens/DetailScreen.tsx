@@ -990,8 +990,43 @@ export default function DetailScreen() {
     const handleShufflePlay = async () => {
         if (tracks.length === 0) return;
 
+        const { queueLimit } = useSettingsStore.getState();
+        const fetchLimit = queueLimit > 0 ? queueLimit : 1000;
+
+        let songsToShuffle = tracks;
+
+        if (hasMore) {
+            try {
+                const params: any = {
+                    IncludeItemTypes: 'Audio',
+                    Recursive: true,
+                    SortBy: 'Random',
+                    Limit: fetchLimit,
+                };
+
+                if (itemId === 'all-songs') {
+                    // No specific parent or filter needed for all songs
+                } else if (itemId === 'liked-songs') {
+                    params.Filters = 'IsFavorite';
+                } else if (type === 'MusicGenre') {
+                    params.GenreIds = itemId;
+                } else {
+                    params.ParentId = itemId;
+                }
+
+                const itemsData = await jellyfinApi.getItems(params);
+                if (itemsData && itemsData.Items) {
+                    songsToShuffle = itemsData.Items;
+                }
+            } catch (error) {
+                console.error('Failed to fetch random songs for shuffle:', error);
+                // Fallback to current tracks
+                songsToShuffle = tracks;
+            }
+        }
+
         // Map tracks in store, then shuffle via store (single-pass, no double work)
-        const mappedTracks = usePlayerStore.getState().setRawQueue(tracks, dataSource, itemId, type || '');
+        const mappedTracks = usePlayerStore.getState().setRawQueue(songsToShuffle, dataSource, itemId, type || '');
         // Enable shuffle mode in the store (this shuffles the already-mapped queue)
         const store = usePlayerStore.getState();
         if (!store.shuffleMode) {

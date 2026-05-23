@@ -213,6 +213,10 @@ export default function MainNavigator() {
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
     const { sourceMode, dataSource } = useSettingsStore();
+    const safeInsets = useSafeAreaInsets();
+    
+    // Fallback for Android 3-button navigation if insets are not reported correctly
+    const bottomInset = Platform.OS === 'android' && safeInsets.bottom === 0 ? 48 : safeInsets.bottom;
 
     // Check if we're in local-only mode (sourceMode is 'local' OR in 'both' mode with local selected)
     const isLocalOnly = sourceMode === 'local' || (sourceMode === 'both' && dataSource === 'local');
@@ -227,10 +231,11 @@ export default function MainNavigator() {
             }}
         >
             <Tab.Navigator
+                backBehavior="history"
                 screenOptions={{
                     headerShown: false,
                     sceneStyle: {
-                        paddingBottom: isLandscape ? 0 : 90, // Push content up in portrait
+                        paddingBottom: isLandscape ? 0 : 90 + bottomInset, // Push content up in portrait
                     },
                     tabBarStyle: isLandscape ? {
                         // Landscape: hide the default tab bar completely
@@ -241,8 +246,8 @@ export default function MainNavigator() {
                         borderTopWidth: 0,
                         position: 'absolute',
                         elevation: 0,
-                        height: 90,
-                        paddingBottom: 0,
+                        height: 90 + bottomInset,
+                        paddingBottom: bottomInset,
                         paddingTop: 0,
                         justifyContent: 'center',
                     },

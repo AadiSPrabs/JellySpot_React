@@ -2,7 +2,7 @@
   "expo": {
     "name": "Jellyspot",
     "slug": "Jellyspot_app",
-    "version": "1.0.0",
+    "version": "1.1.1",
     "orientation": "default",
     "icon": "./assets/AppIcons/playstore.png",
     "userInterfaceStyle": "light",
@@ -67,8 +67,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
+        "projectId": "cef6b2cf-ad63-46ed-8543-a73469363c3c"
       }
-    }
+    },
+    "owner": "intelli453"
   }
 }

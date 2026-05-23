@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { View, StyleSheet, ScrollView, useWindowDimensions, Animated, Modal } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, Animated, Modal, Platform } from 'react-native';
 import { Text, Button, useTheme, Surface, TouchableRipple } from 'react-native-paper';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettingsStore, SourceMode } from '../store/settingsStore';
 import { useAuthStore } from '../store/authStore';
 import { Server, Smartphone, Check } from 'lucide-react-native';
@@ -79,6 +79,8 @@ function SourceCard({ title, description, icon, selected, onPress }: SourceCardP
 export default function OnboardingScreen() {
     const theme = useTheme();
     const { width } = useWindowDimensions();
+    const safeInsets = useSafeAreaInsets();
+    const bottomInset = Platform.OS === 'android' && safeInsets.bottom === 0 ? 48 : safeInsets.bottom;
     const scrollViewRef = useRef<ScrollView>(null);
     const { setSourceMode, setOnboardingComplete, setDataSource } = useSettingsStore();
 
@@ -590,7 +592,7 @@ export default function OnboardingScreen() {
             </ScrollView>
 
             {/* Footer with Step Indicators & Buttons */}
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: 32 + bottomInset }]}>
                 {renderStepIndicators()}
                 {step > 0 && (
                     <Button
