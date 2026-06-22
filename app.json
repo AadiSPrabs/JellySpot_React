@@ -59,11 +59,13 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "ndkVersion": "26.1.10909125"
+            "ndkVersion": "26.1.10909125",
+            "enableShrinkResourcesInReleaseBuilds": true
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/withAndroidSplits"
     ],
     "extra": {
       "eas": {
