@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, LayoutChangeEvent, Animated, Easing } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useTheme } from 'react-native-paper';
+import { useIsAppActive } from '../hooks/useAppState';
 
 interface WavyProgressBarProps {
     progress: number; // 0 to 1
@@ -21,6 +22,8 @@ export const WavyProgressBar: React.FC<WavyProgressBarProps> = ({
     const theme = useTheme();
     const activeColor = color || theme.colors.primary;
     const inactiveColor = trackColor || theme.colors.surfaceVariant;
+    const isAppActive = useIsAppActive();
+    const shouldAnimate = isPlaying && isAppActive;
 
     const [width, setWidth] = useState(0);
     const phase = useRef(new Animated.Value(0)).current;
@@ -32,7 +35,7 @@ export const WavyProgressBar: React.FC<WavyProgressBarProps> = ({
     useEffect(() => {
         let animation: Animated.CompositeAnimation;
 
-        if (isPlaying) {
+        if (shouldAnimate) {
             // Reset value to avoid jumps if restarting? 
             // Actually better to just loop from 0 to -20 continuously
             phase.setValue(0);
@@ -54,7 +57,7 @@ export const WavyProgressBar: React.FC<WavyProgressBarProps> = ({
                 animation.stop();
             }
         };
-    }, [isPlaying]);
+    }, [shouldAnimate]);
 
     // Generate wave path
     // We need a path that is wider than the screen to allow for animation

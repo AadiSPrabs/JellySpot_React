@@ -8,10 +8,12 @@ import Animated, {
     withTiming, 
     Easing,
     useDerivedValue,
-    interpolate
+    interpolate,
+    cancelAnimation,
 } from 'react-native-reanimated';
 import { usePlayerStore } from '../store/playerStore';
 import { useShallow } from 'zustand/react/shallow';
+import { useIsAppActive } from '../hooks/useAppState';
 
 interface LiquidMiniProgressBarProps {
     color?: string;
@@ -19,14 +21,18 @@ interface LiquidMiniProgressBarProps {
 }
 
 export const LiquidMiniProgressBar = ({ color = '#2196F3', height = 64 }: LiquidMiniProgressBarProps) => {
-    const { positionMillis, durationMillis } = usePlayerStore(useShallow(state => ({
+    const { positionMillis, durationMillis, isPlaying } = usePlayerStore(useShallow(state => ({
         positionMillis: state.positionMillis,
-        durationMillis: state.durationMillis
+        durationMillis: state.durationMillis,
+        isPlaying: state.isPlaying,
     })));
     
     const { width: SCREEN_WIDTH } = useWindowDimensions();
     // Account for margins in MiniPlayer (12px each side)
     const containerWidth = SCREEN_WIDTH - 24;
+    
+    const isAppActive = useIsAppActive();
+    const shouldAnimate = isPlaying && isAppActive;
     
     const progress = useDerivedValue(() => {
         if (durationMillis <= 0) return 0;
@@ -36,12 +42,17 @@ export const LiquidMiniProgressBar = ({ color = '#2196F3', height = 64 }: Liquid
     const waveOffset = useSharedValue(0);
 
     useEffect(() => {
+        if (!shouldAnimate) {
+            cancelAnimation(waveOffset);
+            waveOffset.value = withTiming(0, { duration: 300 });
+            return;
+        }
         waveOffset.value = withRepeat(
             withTiming(2 * Math.PI, { duration: 2000, easing: Easing.linear }),
             -1,
             false
         );
-    }, []);
+    }, [shouldAnimate]);
 
     const path = useDerivedValue(() => {
         const p = Skia.Path.Make();
