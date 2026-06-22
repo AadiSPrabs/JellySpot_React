@@ -41,7 +41,16 @@ yarn-error.*
 
 # generated native folders
 /ios
-/android
+
+# Android SDK/build artifacts
+*.apk
+*.aab
+*.hprof
+.gradle/
+local.properties
+
+# opencode AI assistant
+.opencode/
 
 # IDEs
 .vscode/
