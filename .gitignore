@@ -40,6 +40,7 @@ yarn-error.*
 *.tsbuildinfo
 
 # generated native folders
+/android
 /ios
 
 # Android SDK/build artifacts
