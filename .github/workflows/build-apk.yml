@@ -51,23 +51,26 @@ jobs:
             node -e "const fs=require('fs');const a=require('./app.json');a.expo.android.versionCode=${{ inputs.version-code }};fs.writeFileSync('./app.json',JSON.stringify(a,null,2))"
           fi
 
-      - name: Decode keystore
-        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
-
-      - name: Create credentials.json
-        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
+      - name: Decode keystore (if provided)
         run: |
-          echo '{
-            "android": {
-              "keystore": {
-                "keystorePath": "keystore.jks",
-                "keystorePassword": "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}",
-                "keyAlias": "${{ secrets.ANDROID_KEY_ALIAS }}",
-                "keyPassword": "${{ secrets.ANDROID_KEY_PASSWORD }}"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+          fi
+
+      - name: Create credentials.json (if keystore provided)
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo '{
+              "android": {
+                "keystore": {
+                  "keystorePath": "keystore.jks",
+                  "keystorePassword": "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}",
+                  "keyAlias": "${{ secrets.ANDROID_KEY_ALIAS }}",
+                  "keyPassword": "${{ secrets.ANDROID_KEY_PASSWORD }}"
+                }
               }
-            }
-          }' > credentials.json
+            }' > credentials.json
+          fi
 
       - name: Build Android split APKs
         run: eas build --local --platform android --profile ${{ inputs.profile || 'preview-split' }} --non-interactive
