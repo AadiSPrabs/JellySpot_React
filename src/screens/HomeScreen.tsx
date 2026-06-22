@@ -31,106 +31,107 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getColors } from 'react-native-image-colors';
 import { lightenHexColor } from '../utils/colorUtils';
 
-
-import { useShallow } from 'zustand/react/shallow';
-import { MediaItem } from '../types/track';
-
+import { useShallow } from "zustand/react/shallow";
+import { MediaItem } from "../types/track";
 
 // Get greeting based on time of day
 const getGreeting = (): string => {
-    const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return 'Good morning';
-    if (hour >= 12 && hour < 17) return 'Good afternoon';
-    if (hour >= 17 && hour < 21) return 'Good evening';
-    return 'Good night';
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  if (hour >= 17 && hour < 21) return "Good evening";
+  return "Good night";
 };
 
 const getQuirkySubtitle = (): string => {
-    const hour = new Date().getHours();
-    const getRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+  const hour = new Date().getHours();
+  const getRandom = (arr: string[]) =>
+    arr[Math.floor(Math.random() * arr.length)];
 
-    if (hour >= 5 && hour < 12) {
-        return getRandom([
-            "Rise and shine! ☀️",
-            "Coffee first, music second. ☕",
-            "Let's start the day right.",
-            "Morning vibes loading... 🔋",
-            "Ready to conquer the day?"
-        ]);
-    }
-    if (hour >= 12 && hour < 17) {
-        return getRandom([
-            "Keep the momentum going. 🚀",
-            "Focus mode: ON. 🎧",
-            "Afternoon jams incoming.",
-            "Sun's out, music's up. 🌤️",
-            "Power through the slump!"
-        ]);
-    }
-    if (hour >= 17 && hour < 21) {
-        return getRandom([
-            "Unwind time. 🍷",
-            "Relax and listen. 🛋️",
-            "Evening chill session.",
-            "The perfect sunset soundtrack. 🌅",
-            "You earned this break."
-        ]);
-    }
+  if (hour >= 5 && hour < 12) {
     return getRandom([
-        "Late night vibes. 🌙",
-        "The world is quiet. 🤫",
-        "Just you and the music.",
-        "Owl mode activated. 🦉",
-        "Dreamy soundscapes."
+      "Rise and shine! ☀️",
+      "Coffee first, music second. ☕",
+      "Let's start the day right.",
+      "Morning vibes loading... 🔋",
+      "Ready to conquer the day?",
     ]);
+  }
+  if (hour >= 12 && hour < 17) {
+    return getRandom([
+      "Keep the momentum going. 🚀",
+      "Focus mode: ON. 🎧",
+      "Afternoon jams incoming.",
+      "Sun's out, music's up. 🌤️",
+      "Power through the slump!",
+    ]);
+  }
+  if (hour >= 17 && hour < 21) {
+    return getRandom([
+      "Unwind time. 🍷",
+      "Relax and listen. 🛋️",
+      "Evening chill session.",
+      "The perfect sunset soundtrack. 🌅",
+      "You earned this break.",
+    ]);
+  }
+  return getRandom([
+    "Late night vibes. 🌙",
+    "The world is quiet. 🤫",
+    "Just you and the music.",
+    "Owl mode activated. 🦉",
+    "Dreamy soundscapes.",
+  ]);
 };
-
-
 
 // Track if animation has played globally (persists across re-renders and HMR)
 const animationState = { hasPlayed: false };
 
 const HomeScreen = React.memo(function HomeScreen() {
-    const [latestMusic, setLatestMusic] = useState<MediaItem[]>([]);
-    const [resumeItems, setResumeItems] = useState<MediaItem[]>([]);
-    const [glowColor, setGlowColor] = useState<string | null>(null);
+  const [latestMusic, setLatestMusic] = useState<MediaItem[]>([]);
+  const [resumeItems, setResumeItems] = useState<MediaItem[]>([]);
+  const [glowColor, setGlowColor] = useState<string | null>(null);
 
-    const [recommendations, setRecommendations] = useState<MediaItem[]>([]);
-    const [recommendedArtists, setRecommendedArtists] = useState<MediaItem[]>([]);
-    const [mostPlayed, setMostPlayed] = useState<MediaItem[]>([]); // For local mode
-    const [recentlyPlayed, setRecentlyPlayed] = useState<MediaItem[]>([]); // Unified history
-    const [recentlyPlayedPlaylists, setRecentlyPlayedPlaylists] = useState<any[]>([]); // Recent playlists
-    const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]); // For local mode
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [genres, setGenres] = useState<{ Id: string; Name: string }[]>([]);
-    const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const [recommendations, setRecommendations] = useState<MediaItem[]>([]);
+  const [recommendedArtists, setRecommendedArtists] = useState<MediaItem[]>([]);
+  const [mostPlayed, setMostPlayed] = useState<MediaItem[]>([]); // For local mode
+  const [recentlyPlayed, setRecentlyPlayed] = useState<MediaItem[]>([]); // Unified history
+  const [recentlyPlayedPlaylists, setRecentlyPlayedPlaylists] = useState<any[]>(
+    [],
+  ); // Recent playlists
+  const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]); // For local mode
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [genres, setGenres] = useState<{ Id: string; Name: string }[]>([]);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
 
-    // SIMPLE IN-MEMORY CACHE FOR HOME SCREEN
-    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    const getCachedHomeData = () => {
-        const cached = (global as any).homeCache?.[dataSource];
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-            return cached;
-        }
-        return null;
-    };
+  // SIMPLE IN-MEMORY CACHE FOR HOME SCREEN
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  const getCachedHomeData = () => {
+    const cached = (global as any).homeCache?.[dataSource];
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached;
+    }
+    return null;
+  };
 
-    const setCachedHomeData = (data: any) => {
-        if (!(global as any).homeCache) (global as any).homeCache = {};
-        (global as any).homeCache[dataSource] = { ...data, timestamp: Date.now() };
-    };
+  const setCachedHomeData = (data: any) => {
+    if (!(global as any).homeCache) (global as any).homeCache = {};
+    (global as any).homeCache[dataSource] = { ...data, timestamp: Date.now() };
+  };
 
-    const clearCachedHomeData = () => {
-        if ((global as any).homeCache) delete (global as any).homeCache[dataSource];
-    };
+  const clearCachedHomeData = () => {
+    if ((global as any).homeCache) delete (global as any).homeCache[dataSource];
+  };
 
-    // Animations
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideAnim = useRef(new Animated.Value(20)).current;
-    const isFocused = useIsFocused();
-    const { dataSource, sourceMode, localProfile, setLocalProfile } = useSettingsStore(useShallow(state => ({
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+  const isFocused = useIsFocused();
+  const { dataSource, sourceMode, localProfile, setLocalProfile } =
+    useSettingsStore(
+      useShallow((state) => ({
         dataSource: state.dataSource,
         sourceMode: state.sourceMode,
         localProfile: state.localProfile,
@@ -754,7 +755,7 @@ const HomeScreen = React.memo(function HomeScreen() {
                         });
                     }
                 });
-                
+
                 results.latestMusic = localAsMediaItems.slice(0, 10);
                 results.recommendations = [...localAsMediaItems].sort(() => Math.random() - 0.5).slice(0, 5);
                 results.recommendedArtists = Array.from(artistMap.values()).sort(() => Math.random() - 0.5).slice(0, 10);
@@ -1009,7 +1010,7 @@ const HomeScreen = React.memo(function HomeScreen() {
             });
         }
 
-        // Combine pools to ensure the grid is populated with content 
+        // Combine pools to ensure the grid is populated with content
         // Priority: Favorites -> Recently Played -> Resume -> Latest
         const gridPool = [
             ...(Array.isArray(favoriteItems) ? favoriteItems : []),
@@ -1024,7 +1025,7 @@ const HomeScreen = React.memo(function HomeScreen() {
             quickItems.push({
                 id: item.Id,
                 name: item.Name || 'Unknown',
-                imageUrl: getItemImageUrl(item),
+                imageUrl: getItemImageUrl(item) || undefined,
                 type: item.Type || 'Audio',
             });
         }
@@ -1119,581 +1120,842 @@ const HomeScreen = React.memo(function HomeScreen() {
             )}
         </View>
     );
+  // Grid item width calculation for landscape mode (subtract left tab bar width)
+  const contentWidth = isLandscape ? width - LEFT_BAR_WIDTH : width;
+  const gridItemWidth = isLandscape
+    ? (contentWidth - 40) / numColumns - 12
+    : 150;
 
-    // Grid item width calculation for landscape mode (subtract left tab bar width)
-    const contentWidth = isLandscape ? width - LEFT_BAR_WIDTH : width;
-    const gridItemWidth = isLandscape ? (contentWidth - 40) / numColumns - 12 : 150;
+  const renderItem = React.useCallback(
+    ({ item }: { item: MediaItem }) => {
+      const imageUrl = getItemImageUrl(item);
 
-    const renderItem = React.useCallback(({ item }: { item: MediaItem }) => {
-        const imageUrl = getItemImageUrl(item);
+      return (
+        <MediaCard
+          item={item}
+          imageUrl={imageUrl}
+          onPress={() =>
+            dataSource === "local"
+              ? handleSongPress(item)
+              : handleItemPress(item)
+          }
+          style={[
+            !isLandscape && styles.card,
+            isLandscape && {
+              width: gridItemWidth,
+              marginRight: 8,
+              marginBottom: 12,
+            },
+          ]}
+          imageStyle={
+            isLandscape
+              ? { width: gridItemWidth, height: gridItemWidth }
+              : undefined
+          }
+          iconSize={isLandscape ? 40 : 50}
+        />
+      );
+    },
+    [
+      isLandscape,
+      gridItemWidth,
+      dataSource,
+      handleSongPress,
+      handleItemPress,
+      getItemImageUrl,
+    ],
+  );
 
-        return (
-            <MediaCard
-                item={item}
-                imageUrl={imageUrl}
-                onPress={() => dataSource === 'local' ? handleSongPress(item) : handleItemPress(item)}
-                style={[
-                    !isLandscape && styles.card,
-                    isLandscape && {
-                        width: gridItemWidth,
-                        marginRight: 8,
-                        marginBottom: 12
-                    }
-                ]}
-                imageStyle={isLandscape ? { width: gridItemWidth, height: gridItemWidth } : undefined}
-                iconSize={isLandscape ? 40 : 50}
-            />
-        );
-    }, [isLandscape, gridItemWidth, dataSource, handleSongPress, handleItemPress, getItemImageUrl]);
+  const renderSongItem = React.useCallback(
+    ({ item }: { item: MediaItem }) => {
+      const isCurrent = currentTrack?.id === item.Id;
+      const isSelected = selectedTracks.has(item.Id);
 
-    const renderSongItem = React.useCallback(({ item }: { item: MediaItem }) => {
-        const isCurrent = currentTrack?.id === item.Id;
-        const isSelected = selectedTracks.has(item.Id);
+      return (
+        <SongItem
+          item={item}
+          isCurrent={isCurrent}
+          isPlaying={isPlaying}
+          onPress={() => handleSongPress(item)}
+          onLongPress={() => handleLongPress(item)}
+          onMenuPress={() => openTrackMenu(item)}
+          getImageUrl={getItemImageUrl}
+          isSelectionMode={isSelectionMode}
+          isSelected={isSelected}
+          showEqualizer={true}
+        />
+      );
+    },
+    [
+      currentTrack?.id,
+      isPlaying,
+      handleSongPress,
+      handleLongPress,
+      openTrackMenu,
+      getItemImageUrl,
+      isSelectionMode,
+      selectedTracks,
+    ],
+  );
 
-        return (
-            <SongItem
-                item={item}
-                isCurrent={isCurrent}
-                isPlaying={isPlaying}
-                onPress={() => handleSongPress(item)}
-                onLongPress={() => handleLongPress(item)}
-                onMenuPress={() => openTrackMenu(item)}
-                getImageUrl={getItemImageUrl}
-                isSelectionMode={isSelectionMode}
-                isSelected={isSelected}
-                showEqualizer={true}
-            />
-        );
-    }, [currentTrack?.id, isPlaying, handleSongPress, handleLongPress, openTrackMenu, getItemImageUrl, isSelectionMode, selectedTracks]);
+  const renderArtistItem = React.useCallback(
+    ({ item }: { item: MediaItem }) => {
+      const imageUrl =
+        dataSource === "local"
+          ? item.imageUrl
+          : jellyfinApi.getImageUrl(item.Id, "Primary", {
+              maxWidth: 300,
+              quality: 90,
+            });
+      return (
+        <ArtistCard
+          item={item}
+          imageUrl={imageUrl ?? null}
+          onPress={handleItemPress}
+        />
+      );
+    },
+    [dataSource, handleItemPress],
+  );
 
-    const renderArtistItem = React.useCallback(({ item }: { item: MediaItem }) => {
-        const imageUrl = dataSource === 'local' ? item.imageUrl : jellyfinApi.getImageUrl(item.Id, 'Primary', { maxWidth: 300, quality: 90 });
-        return (
-            <ArtistCard
-                item={item}
-                imageUrl={imageUrl ?? null}
-                onPress={handleItemPress}
-            />
-        );
-    }, [dataSource, handleItemPress]);
+  // Whether to show the content skeleton (loading but not a pull-to-refresh)
+  const showContentSkeleton =
+    loading &&
+    !refreshing &&
+    latestMusic.length === 0 &&
+    resumeItems.length === 0;
 
-    // Whether to show the content skeleton (loading but not a pull-to-refresh)
-    const showContentSkeleton = loading && !refreshing && latestMusic.length === 0 && resumeItems.length === 0;
-
-    return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-            {/* Refined Ambient Glow: LinearGradient using dominant color */}
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 450, zIndex: 0 }} pointerEvents="none">
-                <LinearGradient
-                    colors={[
-                        glowColor ? `${glowColor}99` : 'transparent', // 60% opacity for more vibrance
-                        glowColor ? `${glowColor}59` : 'transparent', // 35% opacity
-                        glowColor ? `${glowColor}26` : 'transparent', // 15% opacity
-                        'transparent'
-                    ]}
-                    style={StyleSheet.absoluteFill}
-                    start={{ x: 0.5, y: 0 }}
-                    end={{ x: 0.5, y: 1 }}
-                />
-                {/* Bottom fade-to-background */}
-                <LinearGradient
-                    colors={['transparent', theme.colors.background]}
-                    style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 150 }} // Deeper, smoother fade
-                />
-            </View>
-            <ScrollView
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />
-                }
-                contentContainerStyle={{ paddingBottom: 180, minHeight: height }}
-                scrollEventThrottle={16}
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      edges={["top"]}
+    >
+      {/* Refined Ambient Glow: LinearGradient using dominant color */}
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 450,
+          zIndex: 0,
+        }}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[
+            glowColor ? `${glowColor}99` : "transparent", // 60% opacity for more vibrance
+            glowColor ? `${glowColor}59` : "transparent", // 35% opacity
+            glowColor ? `${glowColor}26` : "transparent", // 15% opacity
+            "transparent",
+          ]}
+          style={StyleSheet.absoluteFill}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+        />
+        {/* Bottom fade-to-background */}
+        <LinearGradient
+          colors={["transparent", theme.colors.background]}
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 150,
+          }} // Deeper, smoother fade
+        />
+      </View>
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme.colors.primary]}
+          />
+        }
+        contentContainerStyle={{ paddingBottom: 180, minHeight: height }}
+        scrollEventThrottle={16}
+      >
+        <View
+          style={[
+            styles.header,
+            isLandscape && { padding: 12, marginBottom: 4 },
+          ]}
+        >
+          {isSelectionMode ? (
+            <View
+              style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
             >
-                <View style={[styles.header, isLandscape && { padding: 12, marginBottom: 4 }]}>
-                    {isSelectionMode ? (
-                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                            <IconButton icon="close" onPress={exitSelectionMode} />
-                            <Text variant="titleLarge" style={{ flex: 1, fontWeight: 'bold', marginLeft: 8 }}>
-                                {selectedTracks.size} Selected
-                            </Text>
-                            <IconButton icon="dots-vertical" onPress={() => setIsSelectionMenuVisible(true)} />
-                            <ActionSheet
-                                visible={isSelectionMenuVisible}
-                                onClose={() => setIsSelectionMenuVisible(false)}
-                                title="Selected Actions"
-                                heightPercentage={40}
-                            >
-                                <View style={{ gap: 4 }}>
-                                    {dataSource !== 'local' && (
-                                        <List.Item
-                                            title="Download Selected"
-                                            left={props => <List.Icon {...props} icon="download" />}
-                                            onPress={handleDownloadSelected}
-                                        />
-                                    )}
-                                    <List.Item
-                                        title="Add to Playlist"
-                                        left={props => <List.Icon {...props} icon="playlist-plus" />}
-                                        onPress={handleAddSelectedToPlaylist}
-                                    />
-                                    {dataSource === 'local' && (
-                                        <List.Item
-                                            title="Delete from Device"
-                                            left={props => <List.Icon {...props} icon="delete" color={theme.colors.error} />}
-                                            titleStyle={{ color: theme.colors.error }}
-                                            onPress={handleDeleteSelected}
-                                        />
-                                    )}
-                                </View>
-                            </ActionSheet>
-                        </View>
-                    ) : (
-                        <Animated.View style={{ flex: 1, opacity: headerOpacity, transform: [{ translateX: headerTranslateX }] }}>
-                            <Text variant={isLandscape ? "titleLarge" : "headlineMedium"} style={{ fontWeight: 'bold' }}>
-                                {greeting}
-                            </Text>
-                            {!isLandscape && (
-                                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-                                    {subtitle}
-                                </Text>
-                            )}
-                        </Animated.View>
-                    )}
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {/* Settings icon - show when profile won't navigate to settings */}
-                        {showSettingsIcon && (
-                            <IconButton
-                                icon="cog"
-                                size={24}
-                                onPress={() => navigation.navigate('Settings')}
-                            />
-                        )}
-                        {/* Profile avatar */}
-                        <TouchableOpacity onPress={handleProfilePress}>
-                            {isLocalOnlyMode ? (
-                                // Local-only mode: show local profile avatar (editable)
-                                localProfile.imageUri ? (
-                                    <Avatar.Image
-                                        size={40}
-                                        source={{ uri: localProfile.imageUri }}
-                                    />
-                                ) : (
-                                    <Avatar.Icon size={40} icon="account" />
-                                )
-                            ) : user?.id ? (
-                                // Jellyfin mode: show Jellyfin user image
-                                <Avatar.Image
-                                    size={40}
-                                    source={{ uri: jellyfinApi.getUserImageUrl(user.id) }}
-                                />
-                            ) : (
-                                <Avatar.Icon size={40} icon="account" />
-                            )}
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* Source Switcher - separate from header text */}
-                {sourceMode === 'both' && (
-                    <View style={{ paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' }}>
-                        <SourceSwitcher />
-                    </View>
-                )}
-
-                <Animated.View style={{
-                    minHeight: height,
-                    opacity: Animated.multiply(fadeAnim, contentOpacity),
-                    transform: [{ translateY: Animated.add(slideAnim, contentTranslateY) }]
-                }}>
-                    {/* Playback Error Banner */}
-                    {!!playbackError && dataSource !== 'local' && (
-                        <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
-                            <Surface style={{ borderRadius: 12, backgroundColor: theme.colors.errorContainer, padding: 12 }} elevation={2}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                    <Icon name="wifi-off" size={24} color={theme.colors.onErrorContainer} />
-                                    <View style={{ marginLeft: 12, flex: 1 }}>
-                                        <Text variant="titleSmall" style={{ color: theme.colors.onErrorContainer, fontWeight: 'bold' }}>Connection Lost</Text>
-                                        <Text variant="bodySmall" style={{ color: theme.colors.onErrorContainer }}>Playback stopped. Check your internet.</Text>
-                                    </View>
-                                </View>
-                            </Surface>
-                        </View>
-                    )}
-
-                    {/* ====== 1. Recently Played Grid ====== */}
-                    {renderRecentlyPlayedGrid()}
-
-                    {/* Content Skeleton — shown during loading while header/switcher remain visible */}
-                    {showContentSkeleton && (
-                        <HomeScreenContentSkeleton isLandscape={isLandscape} numColumns={numColumns} width={width} />
-                    )}
-
-                    {/* Network Error State (Initial Load) */}
-                    {!!error && dataSource !== 'local' && !loading && latestMusic.length === 0 && (
-                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60 }}>
-                            <Surface style={{ borderRadius: 24, padding: 40, alignItems: 'center', width: '85%' }} elevation={2}>
-                                <Icon name="server-network-off" size={72} color={theme.colors.error} />
-                                <Text variant="headlineSmall" style={{ marginTop: 20, marginBottom: 8, fontWeight: 'bold', textAlign: 'center' }}>Can't Reach Server</Text>
-                                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 28, textAlign: 'center', lineHeight: 22 }}>
-                                    {error}
-                                </Text>
-                                <Button mode="contained" onPress={fetchData} icon="refresh" style={{ borderRadius: 24, paddingHorizontal: 16 }} contentStyle={{ height: 48 }}>
-                                    Try Again
-                                </Button>
-                            </Surface>
-                        </View>
-                    )}
-
-                    {/* Empty state (Jellyfin only) when everything is empty */}
-                    {!loading && !error && dataSource !== 'local' && latestMusic.length === 0 && resumeItems.length === 0 && recommendations.length === 0 && recommendedArtists.length === 0 && mostPlayed.length === 0 && favoriteItems.length === 0 && (
-                        <EmptyState
-                            icon='server-network-off'
-                            title='No items found'
-                            description='Your Jellyfin library seems to be empty.'
-                        />
-                    )}
-                    {mostPlayed.length > 0 ? (
-                        <View style={styles.section}>
-                            {renderSectionHeader('Most Played')}
-                            {isLandscape ? (
-                                <View style={[styles.listContent, { flexDirection: 'row', flexWrap: 'wrap' }]}>
-                                    {mostPlayed.slice(0, 10).map((item) => (
-                                        <React.Fragment key={item.Id}>
-                                            {renderItem({ item })}
-                                        </React.Fragment>
-                                    ))}
-                                </View>
-                            ) : (
-                                <View style={styles.listContent}>
-                                    {mostPlayed.slice(0, 5).map((item) => (
-                                        <View key={item.Id}>
-                                            {renderSongItem({ item })}
-                                        </View>
-                                    ))}
-                                </View>
-                            )}
-                        </View>
-                    ) : null}
-
-                    {/* ====== 4. Favorite Songs (both sources) ====== */}
-                    {favoriteItems.length > 0 ? (
-                        <View style={styles.section}>
-                            {renderSectionHeader('Unstoppable Favorites')}
-                            {isLandscape ? (
-                                <View style={[styles.listContent, { flexDirection: 'row', flexWrap: 'wrap' }]}>
-                                    {favoriteItems.map((item) => (
-                                        <React.Fragment key={item.Id}>
-                                            {renderItem({ item })}
-                                        </React.Fragment>
-                                    ))}
-                                </View>
-                            ) : (
-                                <FlatList
-                                    key='list-favorites'
-                                    data={favoriteItems}
-                                    renderItem={renderItem}
-                                    keyExtractor={(item) => item.Id}
-                                    horizontal={true}
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={styles.listContent}
-                                    initialNumToRender={5}
-                                    maxToRenderPerBatch={5}
-                                />
-                            )}
-                        </View>
-                    ) : null}
-
-
-
-                    {/* ====== 6. Artists You Like ====== */}
-                    {recommendedArtists.length > 0 ? (
-                        <View style={styles.section}>
-                            {renderSectionHeader('Artists You Like')}
-                            <FlatList
-                                data={recommendedArtists}
-                                renderItem={renderArtistItem}
-                                keyExtractor={(item) => item.Id}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.listContent}
-                                initialNumToRender={5}
-                                maxToRenderPerBatch={5}
-                            />
-                        </View>
-                    ) : null}
-
-                    {/* ====== 7. Genre Chips ====== */}
-                    {renderGenreChips()}
-
-                    {/* ====== 8. Quick Picks (Songs) ====== */}
-                    {recommendations.length > 0 ? (
-                        <View style={styles.section}>
-                            {renderSectionHeader('Quick Picks')}
-                            {isLandscape ? (
-                                <View style={[styles.listContent, { flexDirection: 'row', flexWrap: 'wrap' }]}>
-                                    {recommendations.slice(0, 10).map((item) => (
-                                        <React.Fragment key={item.Id}>
-                                            {renderItem({ item })}
-                                        </React.Fragment>
-                                    ))}
-                                </View>
-                            ) : (
-                                <View style={styles.listContent}>
-                                    {recommendations.slice(0, 5).map((item) => (
-                                        <View key={item.Id}>
-                                            {renderSongItem({ item })}
-                                        </View>
-                                    ))}
-                                </View>
-                            )}
-                        </View>
-                    ) : null}
-
-                    {/* ====== 9. Fresh Arrivals / Recently Added ====== */}
-                    {latestMusic.length > 0 ? (
-                        <View style={styles.section}>
-                            {renderSectionHeader('Recently Added')}
-                            {isLandscape ? (
-                                <View style={[styles.listContent, { flexDirection: 'row', flexWrap: 'wrap' }]}>
-                                    {latestMusic.map((item) => (
-                                        <React.Fragment key={item.Id}>
-                                            {renderItem({ item })}
-                                        </React.Fragment>
-                                    ))}
-                                </View>
-                            ) : (
-                                <FlatList
-                                    key='list-latest'
-                                    data={latestMusic}
-                                    renderItem={renderItem}
-                                    keyExtractor={(item) => item.Id}
-                                    horizontal={true}
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={styles.listContent}
-                                    initialNumToRender={5}
-                                    maxToRenderPerBatch={5}
-                                />
-                            )}
-                        </View>
-                    ) : null}
-
-                    {/* Empty state for local mode */}
-                    {dataSource === 'local' && latestMusic.length === 0 && recommendations.length === 0 && !loading && (
-                        <EmptyState
-                            icon="folder-open"
-                            title="No local music found"
-                            description="Go to Settings → Storage to select a music folder"
-                            actionLabel="Open Storage Settings"
-                            onAction={() => navigation.navigate('StorageSettings')}
-                        />
-                    )}
-                </Animated.View>
-            </ScrollView>
-
-            {/* Profile Edit Dialog (local-only mode) */}
-            {/* Profile Edit ActionSheet (local-only mode) */}
-            <ActionSheet visible={profileDialogVisible} onClose={() => setProfileDialogVisible(false)} title="Edit Profile" heightPercentage={45}>
-                <View style={{ gap: 16 }}>
-                    <View style={{ alignItems: 'center' }}>
-                        <TouchableOpacity onPress={handlePickImage}>
-                            {localProfile.imageUri ? (
-                                <Avatar.Image size={80} source={{ uri: localProfile.imageUri }} />
-                            ) : (
-                                <Avatar.Icon size={80} icon="account" />
-                            )}
-                        </TouchableOpacity>
-                        <Button
-                            mode="text"
-                            onPress={handlePickImage}
-                            style={{ marginTop: 8 }}
-                        >
-                            Change Photo
-                        </Button>
-                    </View>
-                    <TextInput
-                        label="Display Name"
-                        value={editName}
-                        onChangeText={setEditName}
-                        mode="outlined"
-                    />
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setProfileDialogVisible(false)}>Cancel</Button>
-                        <Button mode="contained" onPress={handleSaveProfile}>Save</Button>
-                    </View>
-                </View>
-            </ActionSheet>
-
-            {/* Track Options Menu */}
-            <ActionSheet visible={isTrackMenuVisible} onClose={() => setIsTrackMenuVisible(false)} title={selectedTrack?.Name || 'Track Options'}>
+              <IconButton icon="close" onPress={exitSelectionMode} />
+              <Text
+                variant="titleLarge"
+                style={{ flex: 1, fontWeight: "bold", marginLeft: 8 }}
+              >
+                {selectedTracks.size} Selected
+              </Text>
+              <IconButton
+                icon="dots-vertical"
+                onPress={() => setIsSelectionMenuVisible(true)}
+              />
+              <ActionSheet
+                visible={isSelectionMenuVisible}
+                onClose={() => setIsSelectionMenuVisible(false)}
+                title="Selected Actions"
+                heightPercentage={40}
+              >
                 <View style={{ gap: 4 }}>
+                  {dataSource !== "local" && (
                     <List.Item
-                        title="Play Next"
-                        description="Add to queue after current song"
-                        left={props => <List.Icon {...props} icon="playlist-play" />}
-                        onPress={handlePlayNext}
+                      title="Download Selected"
+                      left={(props) => <List.Icon {...props} icon="download" />}
+                      onPress={handleDownloadSelected}
                     />
+                  )}
+                  <List.Item
+                    title="Add to Playlist"
+                    left={(props) => (
+                      <List.Icon {...props} icon="playlist-plus" />
+                    )}
+                    onPress={handleAddSelectedToPlaylist}
+                  />
+                  {dataSource === "local" && (
                     <List.Item
-                        title="Add to Queue"
-                        description="Add to end of queue"
-                        left={props => <List.Icon {...props} icon="playlist-plus" />}
-                        onPress={handleAddToQueue}
-                    />
-                    <List.Item
-                        title="Add to Playlist"
-                        description="Save to a playlist"
-                        left={props => <List.Icon {...props} icon="playlist-music" />}
-                        onPress={handleOpenAddToPlaylist}
-                    />
-                    {dataSource !== 'local' && (
-                        <List.Item
-                            title="Download"
-                            description="Save for offline listening"
-                            left={props => <List.Icon {...props} icon="download" />}
-                            onPress={handleDownloadTrack}
+                      title="Delete from Device"
+                      left={(props) => (
+                        <List.Icon
+                          {...props}
+                          icon="delete"
+                          color={theme.colors.error}
                         />
-                    )}
-                    {dataSource === 'local' && (
-                        <List.Item
-                            title="Delete from Device"
-                            description="Permanently remove this track"
-                            titleStyle={{ color: '#f44336' }}
-                            left={props => <List.Icon {...props} icon="delete" color="#f44336" />}
-                            onPress={handleDeleteTrack}
-                        />
-                    )}
+                      )}
+                      titleStyle={{ color: theme.colors.error }}
+                      onPress={handleDeleteSelected}
+                    />
+                  )}
                 </View>
-            </ActionSheet>
-
-            {/* Add to Playlist ActionSheet */}
-            <ActionSheet visible={isAddToPlaylistVisible} onClose={() => setIsAddToPlaylistVisible(false)} title="Add to Playlist" scrollable>
-                <View style={{ gap: 4 }}>
-                    {isAddingToPlaylist ? (
-                        <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
-                            <ActivityIndicator size="large" color={theme.colors.primary} />
-                            <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>Adding to playlist...</Text>
-                        </View>
-                    ) : (
-                        playlists.map(playlist => (
-                            <List.Item
-                                key={playlist.Id}
-                                title={playlist.Name}
-                                left={props => <List.Icon {...props} icon="playlist-music" />}
-                                onPress={() => handleAddToPlaylist(playlist.Id)}
-                            />
-                        ))
-                    )}
-                </View>
-            </ActionSheet>
-
-            {/* Duplicate Song ActionSheet */}
-            <ActionSheet visible={isDuplicateDialogVisible} onClose={() => setIsDuplicateDialogVisible(false)} title="Duplicate Song" heightPercentage={30}>
-                <View style={{ gap: 16 }}>
-                    <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
-                        <Button mode="contained" onPress={() => {
-                            if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
-                        }}>Add Anyway</Button>
-                    </View>
-                </View>
-            </ActionSheet>
-
-            {/* Orientation Transition Curtain */}
+              </ActionSheet>
+            </View>
+          ) : (
             <Animated.View
-                pointerEvents="none"
-                style={[
-                    StyleSheet.absoluteFill,
-                    {
-                        backgroundColor: theme.colors.background,
-                        opacity: layoutOpacity.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [1, 0] // 0 (hidden) -> 1 (visible) -> 0 (hidden)
-                        }),
-                        zIndex: 9999
-                    }
-                ]}
+              style={{
+                flex: 1,
+                opacity: headerOpacity,
+                transform: [{ translateX: headerTranslateX }],
+              }}
+            >
+              <Text
+                variant={isLandscape ? "titleLarge" : "headlineMedium"}
+                style={{ fontWeight: "bold" }}
+              >
+                {greeting}
+              </Text>
+              {!isLandscape && (
+                <Text
+                  variant="bodyMedium"
+                  style={{ color: theme.colors.onSurfaceVariant }}
+                >
+                  {subtitle}
+                </Text>
+              )}
+            </Animated.View>
+          )}
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {/* Settings icon - show when profile won't navigate to settings */}
+            {showSettingsIcon && (
+              <IconButton
+                icon="cog"
+                size={24}
+                onPress={() => navigation.navigate("Settings")}
+              />
+            )}
+            {/* Profile avatar */}
+            <TouchableOpacity onPress={handleProfilePress}>
+              {isLocalOnlyMode ? (
+                // Local-only mode: show local profile avatar (editable)
+                localProfile.imageUri ? (
+                  <Avatar.Image
+                    size={40}
+                    source={{ uri: localProfile.imageUri }}
+                  />
+                ) : (
+                  <Avatar.Icon size={40} icon="account" />
+                )
+              ) : user?.id ? (
+                // Jellyfin mode: show Jellyfin user image
+                <Avatar.Image
+                  size={40}
+                  source={{ uri: jellyfinApi.getUserImageUrl(user.id) }}
+                />
+              ) : (
+                <Avatar.Icon size={40} icon="account" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Source Switcher - separate from header text */}
+        {sourceMode === "both" && (
+          <View
+            style={{
+              paddingHorizontal: 16,
+              marginBottom: 16,
+              alignItems: "center",
+            }}
+          >
+            <SourceSwitcher />
+          </View>
+        )}
+
+        <Animated.View
+          style={{
+            minHeight: height,
+            opacity: Animated.multiply(fadeAnim, contentOpacity),
+            transform: [
+              { translateY: Animated.add(slideAnim, contentTranslateY) },
+            ],
+          }}
+        >
+          {/* Playback Error Banner */}
+          {!!playbackError && dataSource !== "local" && (
+            <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
+              <Surface
+                style={{
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.errorContainer,
+                  padding: 12,
+                }}
+                elevation={2}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Icon
+                    name="wifi-off"
+                    size={24}
+                    color={theme.colors.onErrorContainer}
+                  />
+                  <View style={{ marginLeft: 12, flex: 1 }}>
+                    <Text
+                      variant="titleSmall"
+                      style={{
+                        color: theme.colors.onErrorContainer,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Connection Lost
+                    </Text>
+                    <Text
+                      variant="bodySmall"
+                      style={{ color: theme.colors.onErrorContainer }}
+                    >
+                      Playback stopped. Check your internet.
+                    </Text>
+                  </View>
+                </View>
+              </Surface>
+            </View>
+          )}
+
+          {/* ====== 1. Recently Played Grid ====== */}
+          {renderRecentlyPlayedGrid()}
+
+          {/* Content Skeleton — shown during loading while header/switcher remain visible */}
+          {showContentSkeleton && (
+            <HomeScreenContentSkeleton
+              isLandscape={isLandscape}
+              numColumns={numColumns}
+              width={width}
             />
-        </SafeAreaView >
-    );
+          )}
+
+          {/* Network Error State (Initial Load) */}
+          {!!error &&
+            dataSource !== "local" &&
+            !loading &&
+            latestMusic.length === 0 && (
+              <View
+                style={{
+                  flex: 1,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  paddingVertical: 60,
+                }}
+              >
+                <Surface
+                  style={{
+                    borderRadius: 24,
+                    padding: 40,
+                    alignItems: "center",
+                    width: "85%",
+                  }}
+                  elevation={2}
+                >
+                  <Icon
+                    name="server-network-off"
+                    size={72}
+                    color={theme.colors.error}
+                  />
+                  <Text
+                    variant="headlineSmall"
+                    style={{
+                      marginTop: 20,
+                      marginBottom: 8,
+                      fontWeight: "bold",
+                      textAlign: "center",
+                    }}
+                  >
+                    Can't Reach Server
+                  </Text>
+                  <Text
+                    variant="bodyMedium"
+                    style={{
+                      color: theme.colors.onSurfaceVariant,
+                      marginBottom: 28,
+                      textAlign: "center",
+                      lineHeight: 22,
+                    }}
+                  >
+                    {error}
+                  </Text>
+                  <Button
+                    mode="contained"
+                    onPress={() => fetchData()}
+                    icon="refresh"
+                    style={{ borderRadius: 24, paddingHorizontal: 16 }}
+                    contentStyle={{ height: 48 }}
+                  >
+                    Try Again
+                  </Button>
+                </Surface>
+              </View>
+            )}
+
+          {/* Empty state (Jellyfin only) when everything is empty */}
+          {!loading &&
+            !error &&
+            dataSource !== "local" &&
+            latestMusic.length === 0 &&
+            resumeItems.length === 0 &&
+            recommendations.length === 0 &&
+            recommendedArtists.length === 0 &&
+            mostPlayed.length === 0 &&
+            favoriteItems.length === 0 && (
+              <EmptyState
+                icon="server-network-off"
+                title="No items found"
+                description="Your Jellyfin library seems to be empty."
+              />
+            )}
+          {mostPlayed.length > 0 ? (
+            <View style={styles.section}>
+              {renderSectionHeader("Most Played")}
+              {isLandscape ? (
+                <View
+                  style={[
+                    styles.listContent,
+                    { flexDirection: "row", flexWrap: "wrap" },
+                  ]}
+                >
+                  {mostPlayed.slice(0, 10).map((item) => (
+                    <React.Fragment key={item.Id}>
+                      {renderItem({ item })}
+                    </React.Fragment>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.listContent}>
+                  {mostPlayed.slice(0, 5).map((item) => (
+                    <View key={item.Id}>{renderSongItem({ item })}</View>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {/* ====== 4. Favorite Songs (both sources) ====== */}
+          {favoriteItems.length > 0 ? (
+            <View style={styles.section}>
+              {renderSectionHeader("Unstoppable Favorites")}
+              {isLandscape ? (
+                <View
+                  style={[
+                    styles.listContent,
+                    { flexDirection: "row", flexWrap: "wrap" },
+                  ]}
+                >
+                  {favoriteItems.map((item) => (
+                    <React.Fragment key={item.Id}>
+                      {renderItem({ item })}
+                    </React.Fragment>
+                  ))}
+                </View>
+              ) : (
+                <FlatList
+                  key="list-favorites"
+                  data={favoriteItems}
+                  renderItem={renderItem}
+                  keyExtractor={(item) => item.Id}
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.listContent}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                />
+              )}
+            </View>
+          ) : null}
+
+          {/* ====== 6. Artists You Like ====== */}
+          {recommendedArtists.length > 0 ? (
+            <View style={styles.section}>
+              {renderSectionHeader("Artists You Like")}
+              <FlatList
+                data={recommendedArtists}
+                renderItem={renderArtistItem}
+                keyExtractor={(item) => item.Id}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.listContent}
+                initialNumToRender={5}
+                maxToRenderPerBatch={5}
+              />
+            </View>
+          ) : null}
+
+          {/* ====== 7. Genre Chips ====== */}
+          {renderGenreChips()}
+
+          {/* ====== 8. Quick Picks (Songs) ====== */}
+          {recommendations.length > 0 ? (
+            <View style={styles.section}>
+              {renderSectionHeader("Quick Picks")}
+              {isLandscape ? (
+                <View
+                  style={[
+                    styles.listContent,
+                    { flexDirection: "row", flexWrap: "wrap" },
+                  ]}
+                >
+                  {recommendations.slice(0, 10).map((item) => (
+                    <React.Fragment key={item.Id}>
+                      {renderItem({ item })}
+                    </React.Fragment>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.listContent}>
+                  {recommendations.slice(0, 5).map((item) => (
+                    <View key={item.Id}>{renderSongItem({ item })}</View>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {/* ====== 9. Fresh Arrivals / Recently Added ====== */}
+          {latestMusic.length > 0 ? (
+            <View style={styles.section}>
+              {renderSectionHeader("Recently Added")}
+              {isLandscape ? (
+                <View
+                  style={[
+                    styles.listContent,
+                    { flexDirection: "row", flexWrap: "wrap" },
+                  ]}
+                >
+                  {latestMusic.map((item) => (
+                    <React.Fragment key={item.Id}>
+                      {renderItem({ item })}
+                    </React.Fragment>
+                  ))}
+                </View>
+              ) : (
+                <FlatList
+                  key="list-latest"
+                  data={latestMusic}
+                  renderItem={renderItem}
+                  keyExtractor={(item) => item.Id}
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.listContent}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                />
+              )}
+            </View>
+          ) : null}
+
+          {/* Empty state for local mode */}
+          {dataSource === "local" &&
+            latestMusic.length === 0 &&
+            recommendations.length === 0 &&
+            !loading && (
+              <EmptyState
+                icon="folder-open"
+                title="No local music found"
+                description="Go to Settings → Storage to select a music folder"
+                actionLabel="Open Storage Settings"
+                onAction={() => navigation.navigate("StorageSettings")}
+              />
+            )}
+        </Animated.View>
+      </ScrollView>
+
+      {/* Profile Edit Dialog (local-only mode) */}
+      {/* Profile Edit ActionSheet (local-only mode) */}
+      <ActionSheet
+        visible={profileDialogVisible}
+        onClose={() => setProfileDialogVisible(false)}
+        title="Edit Profile"
+        heightPercentage={45}
+      >
+        <View style={{ gap: 16 }}>
+          <View style={{ alignItems: "center" }}>
+            <TouchableOpacity onPress={handlePickImage}>
+              {localProfile.imageUri ? (
+                <Avatar.Image
+                  size={80}
+                  source={{ uri: localProfile.imageUri }}
+                />
+              ) : (
+                <Avatar.Icon size={80} icon="account" />
+              )}
+            </TouchableOpacity>
+            <Button
+              mode="text"
+              onPress={handlePickImage}
+              style={{ marginTop: 8 }}
+            >
+              Change Photo
+            </Button>
+          </View>
+          <TextInput
+            label="Display Name"
+            value={editName}
+            onChangeText={setEditName}
+            mode="outlined"
+          />
+          <View
+            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}
+          >
+            <Button mode="text" onPress={() => setProfileDialogVisible(false)}>
+              Cancel
+            </Button>
+            <Button mode="contained" onPress={handleSaveProfile}>
+              Save
+            </Button>
+          </View>
+        </View>
+      </ActionSheet>
+
+      {/* Track Options Menu */}
+      <ActionSheet
+        visible={isTrackMenuVisible}
+        onClose={() => setIsTrackMenuVisible(false)}
+        title={selectedTrack?.Name || "Track Options"}
+      >
+        <View style={{ gap: 4 }}>
+          <List.Item
+            title="Play Next"
+            description="Add to queue after current song"
+            left={(props) => <List.Icon {...props} icon="playlist-play" />}
+            onPress={handlePlayNext}
+          />
+          <List.Item
+            title="Add to Queue"
+            description="Add to end of queue"
+            left={(props) => <List.Icon {...props} icon="playlist-plus" />}
+            onPress={handleAddToQueue}
+          />
+          <List.Item
+            title="Add to Playlist"
+            description="Save to a playlist"
+            left={(props) => <List.Icon {...props} icon="playlist-music" />}
+            onPress={handleOpenAddToPlaylist}
+          />
+          {dataSource !== "local" && (
+            <List.Item
+              title="Download"
+              description="Save for offline listening"
+              left={(props) => <List.Icon {...props} icon="download" />}
+              onPress={handleDownloadTrack}
+            />
+          )}
+          {dataSource === "local" && (
+            <List.Item
+              title="Delete from Device"
+              description="Permanently remove this track"
+              titleStyle={{ color: "#f44336" }}
+              left={(props) => (
+                <List.Icon {...props} icon="delete" color="#f44336" />
+              )}
+              onPress={handleDeleteTrack}
+            />
+          )}
+        </View>
+      </ActionSheet>
+
+      {/* Add to Playlist ActionSheet */}
+      <ActionSheet
+        visible={isAddToPlaylistVisible}
+        onClose={() => setIsAddToPlaylistVisible(false)}
+        title="Add to Playlist"
+        scrollable
+      >
+        <View style={{ gap: 4 }}>
+          {isAddingToPlaylist ? (
+            <View
+              style={{
+                padding: 40,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+              <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>
+                Adding to playlist...
+              </Text>
+            </View>
+          ) : (
+            playlists.map((playlist) => (
+              <List.Item
+                key={playlist.Id}
+                title={playlist.Name}
+                left={(props) => <List.Icon {...props} icon="playlist-music" />}
+                onPress={() => handleAddToPlaylist(playlist.Id)}
+              />
+            ))
+          )}
+        </View>
+      </ActionSheet>
+
+      {/* Duplicate Song ActionSheet */}
+      <ActionSheet
+        visible={isDuplicateDialogVisible}
+        onClose={() => setIsDuplicateDialogVisible(false)}
+        title="Duplicate Song"
+        heightPercentage={30}
+      >
+        <View style={{ gap: 16 }}>
+          <Text variant="bodyMedium">
+            This song is already in the playlist. Do you want to add it anyway?
+          </Text>
+          <View
+            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}
+          >
+            <Button
+              mode="text"
+              onPress={() => setIsDuplicateDialogVisible(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              mode="contained"
+              onPress={() => {
+                if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
+              }}
+            >
+              Add Anyway
+            </Button>
+          </View>
+        </View>
+      </ActionSheet>
+
+      {/* Orientation Transition Curtain */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: theme.colors.background,
+            opacity: layoutOpacity.interpolate({
+              inputRange: [0, 1],
+              outputRange: [1, 0], // 0 (hidden) -> 1 (visible) -> 0 (hidden)
+            }),
+            zIndex: 9999,
+          },
+        ]}
+      />
+    </SafeAreaView>
+  );
 });
 
 export default HomeScreen;
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 20,
-        marginBottom: 10,
-    },
-    section: {
-        marginBottom: 32,
-    },
-    sectionTitle: {
-        marginLeft: 20,
-        marginBottom: 16,
-        fontWeight: 'bold',
-    },
-    listContent: {
-        paddingHorizontal: 20,
-    },
-    card: {
-        marginRight: 16,
-        width: 150,
-        backgroundColor: 'transparent',
-        shadowColor: 'transparent', // Remove shadow from card itself
-    },
-    cardImage: {
-        width: 150,
-        height: 150,
-        borderRadius: 16, // Softer corners
-    },
-    cardContent: {
-        paddingHorizontal: 0,
-        paddingVertical: 8,
-    },
-    songCard: {
-        marginBottom: 4,
-        backgroundColor: 'transparent',
-        shadowColor: 'transparent',
-    },
-    songImage: {
-        width: 56,
-        height: 56,
-        borderRadius: 8,
-    },
-    artistContainer: {
-        marginRight: 20,
-        alignItems: 'center',
-        width: 100,
-    },
-    artistName: {
-        marginTop: 12,
-        textAlign: 'center',
-    },
-    emptyState: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 40,
-    },
-    placeholderContainer: {
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    songPlaceholder: {
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    artistPlaceholder: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    marginBottom: 10,
+  },
+  section: {
+    marginBottom: 32,
+  },
+  sectionTitle: {
+    marginLeft: 20,
+    marginBottom: 16,
+    fontWeight: "bold",
+  },
+  listContent: {
+    paddingHorizontal: 20,
+  },
+  card: {
+    marginRight: 16,
+    width: 150,
+    backgroundColor: "transparent",
+    shadowColor: "transparent", // Remove shadow from card itself
+  },
+  cardImage: {
+    width: 150,
+    height: 150,
+    borderRadius: 16, // Softer corners
+  },
+  cardContent: {
+    paddingHorizontal: 0,
+    paddingVertical: 8,
+  },
+  songCard: {
+    marginBottom: 4,
+    backgroundColor: "transparent",
+    shadowColor: "transparent",
+  },
+  songImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+  },
+  artistContainer: {
+    marginRight: 20,
+    alignItems: "center",
+    width: 100,
+  },
+  artistName: {
+    marginTop: 12,
+    textAlign: "center",
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+  },
+  placeholderContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  songPlaceholder: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  artistPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });

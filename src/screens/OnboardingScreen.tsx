@@ -607,7 +607,7 @@ export default function OnboardingScreen() {
                 {step !== 1 && (
                     <Button
                         mode="contained"
-                        onPress={step === 3 ? handleFinish : handleNextStep}
+                        onPress={step === 3 ? () => handleFinish() : () => handleNextStep()}
                         disabled={(step === 0 && !canContinue) || (step === 1 && !isAuthenticated)}
                         style={styles.continueButton}
                         contentStyle={styles.continueButtonContent}

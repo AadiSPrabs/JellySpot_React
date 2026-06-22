@@ -10,6 +10,8 @@ import { RootStackParamList } from '../types/navigation';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSettingsStore } from '../store/settingsStore';
+import { useUISettingsStore } from '../store/uiSettingsStore';
+import { usePlaybackSettingsStore } from '../store/playbackSettingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { DatabaseService } from '../services/DatabaseService';
 import { audioService } from '../services/AudioService';
@@ -80,11 +82,15 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
     const localLibrary = useLocalLibraryStore();
-    const { backgroundType, themeColor, showTechnicalDetails, audioQuality, playbackRate, setPlaybackRate } = useSettingsStore(useShallow(s => ({
+    const { backgroundType, themeColor, showTechnicalDetails } = useUISettingsStore(useShallow(s => ({
         backgroundType: s.backgroundType,
         themeColor: s.themeColor,
         showTechnicalDetails: s.showTechnicalDetails,
+    })));
+    const { audioQuality } = useSettingsStore(useShallow(s => ({
         audioQuality: s.audioQuality,
+    })));
+    const { playbackRate, setPlaybackRate } = usePlaybackSettingsStore(useShallow(s => ({
         playbackRate: s.playbackRate,
         setPlaybackRate: s.setPlaybackRate,
     })));
@@ -928,19 +934,23 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                                 );
                                             })()}
                                         </View>
-                                        <IconButton
-                                            icon={isFavorite ? "heart" : "heart-outline"}
-                                            iconColor={playerColors.activeColor}
-                                            size={28}
-                                            onPress={handleLike}
-                                            accessibilityLabel={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
-                                        />
-                                        <IconButton
-                                            icon="dots-vertical"
-                                            iconColor={playerColors.activeColor}
-                                            size={28}
-                                            onPress={handleOpenTrackMenu}
-                                        />
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: -8 }}>
+                                            <IconButton
+                                                icon={isFavorite ? "heart" : "heart-outline"}
+                                                iconColor={playerColors.activeColor}
+                                                size={28}
+                                                onPress={handleLike}
+                                                accessibilityLabel={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                                                style={{ margin: 0 }}
+                                            />
+                                            <IconButton
+                                                icon="dots-vertical"
+                                                iconColor={playerColors.activeColor}
+                                                size={28}
+                                                onPress={handleOpenTrackMenu}
+                                                style={{ margin: 0 }}
+                                            />
+                                        </View>
                                     </View>
                                 </>
                             )}
@@ -1373,6 +1383,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingHorizontal: 20,
     },
     controls: {
         flexDirection: 'row',

@@ -1,81 +1,72 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Animated, LayoutChangeEvent, StyleSheet } from 'react-native';
+import { View, Animated, Easing, LayoutChangeEvent, StyleSheet } from 'react-native';
 import { Text } from 'react-native-paper';
 
 interface MarqueeTextProps {
     text: string;
     style?: any;
     variant?: any;
-    speed?: number; // pixels per second
-    pauseDuration?: number; // ms to pause at each end before scrolling
 }
 
 export default function MarqueeText({
     text,
     style,
     variant = 'headlineSmall',
-    speed = 30,
-    pauseDuration = 2000,
 }: MarqueeTextProps) {
-    const [containerWidth, setContainerWidth] = useState(0);
-    const [textWidth, setTextWidth] = useState(0);
     const translateX = useRef(new Animated.Value(0)).current;
-    const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+    const animRef = useRef<Animated.CompositeAnimation | null>(null);
+    const [cw, setCw] = useState(0);
+    const [tw, setTw] = useState(0);
 
-    const overflow = textWidth - containerWidth;
-    const shouldScroll = overflow > 5 && containerWidth > 0; // 5px threshold to avoid jitter
+    const overflow = tw - cw;
+    const shouldScroll = overflow > 5 && cw > 0;
 
-    // Restart animation whenever text or measurements change
     useEffect(() => {
-        if (animationRef.current) {
-            animationRef.current.stop();
-            animationRef.current = null;
+        if (animRef.current) {
+            animRef.current.stop();
+            animRef.current = null;
         }
         translateX.setValue(0);
 
         if (!shouldScroll) return;
 
-        const scrollDuration = (overflow / speed) * 1000;
+        const duration = overflow * 25;
 
         const loop = Animated.loop(
             Animated.sequence([
-                // Pause at start position
-                Animated.delay(pauseDuration),
-                // Scroll left to reveal end of text
+                Animated.delay(1500),
                 Animated.timing(translateX, {
                     toValue: -overflow,
-                    duration: scrollDuration,
-                    useNativeDriver: true,
+                    duration,
+                    useNativeDriver: false,
+                    easing: Easing.linear,
                 }),
-                // Pause at end position
-                Animated.delay(pauseDuration),
-                // Scroll back to start
+                Animated.delay(1500),
                 Animated.timing(translateX, {
                     toValue: 0,
-                    duration: scrollDuration,
-                    useNativeDriver: true,
+                    duration,
+                    useNativeDriver: false,
+                    easing: Easing.linear,
                 }),
             ]),
         );
 
-        animationRef.current = loop;
+        animRef.current = loop;
         loop.start();
 
         return () => {
             loop.stop();
-            animationRef.current = null;
+            animRef.current = null;
         };
-    }, [text, shouldScroll, overflow, speed, pauseDuration]);
+    }, [shouldScroll, overflow]);
 
     const onContainerLayout = (e: LayoutChangeEvent) => {
-        setContainerWidth(e.nativeEvent.layout.width);
+        setCw(e.nativeEvent.layout.width);
     };
 
     const onTextLayout = (e: any) => {
-        // react-native-paper Text fires onTextLayout with lines array
-        if (e?.nativeEvent?.lines?.length > 0) {
-            const measuredWidth = e.nativeEvent.lines[0].width;
-            setTextWidth(measuredWidth);
+        if (e.nativeEvent.lines?.length > 0) {
+            setTw(e.nativeEvent.lines[0].width);
         }
     };
 
@@ -87,14 +78,15 @@ export default function MarqueeText({
                     { transform: [{ translateX }] },
                 ]}
             >
-                <Text
-                    variant={variant}
-                    style={[style, styles.text]}
-                    numberOfLines={1}
-                    onTextLayout={onTextLayout}
-                >
-                    {text}
-                </Text>
+                <View style={styles.spacer}>
+                    <Text
+                        variant={variant}
+                        style={style}
+                        onTextLayout={onTextLayout}
+                    >
+                        {text}
+                    </Text>
+                </View>
             </Animated.View>
         </View>
     );
@@ -108,8 +100,7 @@ const styles = StyleSheet.create({
     textWrapper: {
         flexDirection: 'row',
     },
-    text: {
-        // Prevent wrapping — let the text extend beyond the container
-        // The container clips it with overflow: hidden
+    spacer: {
+        width: 9999,
     },
 });

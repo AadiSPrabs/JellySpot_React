@@ -1,14 +1,14 @@
-import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
-import { createJSONStorage, persist, StateStorage } from 'zustand/middleware';
+import { create } from "zustand";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
+import { createJSONStorage, persist, StateStorage } from "zustand/middleware";
 
-const SECURE_TOKEN_KEY = 'jellyspot-auth-token';
+const SECURE_TOKEN_KEY = "jellyspot-auth-token";
 
 interface User {
-    id: string;
-    name: string;
-    token: string;
+  id: string;
+  name: string;
+  token: string;
 }
 
 interface AuthState {
@@ -22,49 +22,63 @@ interface AuthState {
 
 // Custom storage adapter: token goes to SecureStore, everything else to AsyncStorage
 const secureAuthStorage: StateStorage = {
-    getItem: async (name: string): Promise<string | null> => {
-        // Read base state from AsyncStorage
-        const raw = await AsyncStorage.getItem(name);
-        if (!raw) return null;
+  getItem: async (name: string): Promise<string | null> => {
+    // Read base state from AsyncStorage
+    const raw = await AsyncStorage.getItem(name);
+    if (!raw) return null;
 
-        try {
-            const parsed = JSON.parse(raw);
-            // Restore token from SecureStore into the state object
-            if (parsed?.state?.user) {
-                const secureToken = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
-                if (secureToken) {
-                    parsed.state.user.token = secureToken;
-                }
-            }
-            return JSON.stringify(parsed);
-        } catch {
-            return raw;
+    try {
+      const parsed = JSON.parse(raw);
+      // Restore token from SecureStore into the state object
+      if (parsed?.state?.user) {
+        const secureToken = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
+        if (secureToken) {
+          parsed.state.user.token = secureToken;
         }
-    },
-    setItem: async (name: string, value: string): Promise<void> => {
-        try {
-            const parsed = JSON.parse(value);
-            // Extract and store token securely
-            if (parsed?.state?.user?.token) {
-                await SecureStore.setItemAsync(SECURE_TOKEN_KEY, parsed.state.user.token);
-                // Remove token from the AsyncStorage copy
-                parsed.state.user.token = '';
-            }
-            await AsyncStorage.setItem(name, JSON.stringify(parsed));
-        } catch {
-            await AsyncStorage.setItem(name, value);
-        }
-    },
-    removeItem: async (name: string): Promise<void> => {
-        await AsyncStorage.removeItem(name);
-        await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
-    },
+      }
+      return JSON.stringify(parsed);
+    } catch {
+      return raw;
+    }
+  },
+  setItem: async (name: string, value: string): Promise<void> => {
+    try {
+      const parsed = JSON.parse(value);
+      // Extract and store token securely
+      if (parsed?.state?.user?.token) {
+        await SecureStore.setItemAsync(
+          SECURE_TOKEN_KEY,
+          parsed.state.user.token,
+        );
+        // Remove token from the AsyncStorage copy
+        parsed.state.user.token = "";
+      }
+      await AsyncStorage.setItem(name, JSON.stringify(parsed));
+    } catch {
+      await AsyncStorage.setItem(name, value);
+    }
+  },
+  removeItem: async (name: string): Promise<void> => {
+    await AsyncStorage.removeItem(name);
+    await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
+  },
+};
+
+// Injected WebSocket service instance (set from App.tsx startup)
+let injectedWebSocket: { connect: () => void; disconnect: () => void } | null = null;
+export const setWebSocketService = (ws: typeof injectedWebSocket) => {
+    injectedWebSocket = ws;
+};
+
+const getWebSocketService = () => {
+    if (injectedWebSocket) return injectedWebSocket;
+    return require('../services/WebSocketService').webSocketService;
 };
 
 // Side effect listener for Auth changes
 const initAuthListeners = (store: any) => {
     store.subscribe((state: AuthState, prevState: AuthState) => {
-        const { webSocketService } = require('../services/WebSocketService');
+        const webSocketService = getWebSocketService();
 
         if (state.isAuthenticated && (!prevState.isAuthenticated || state.serverUrl !== prevState.serverUrl)) {
             webSocketService.connect();
@@ -76,6 +90,17 @@ const initAuthListeners = (store: any) => {
     });
 };
 
+// Injected player store reference (set from App.tsx startup)
+let injectedPlayerReset: (() => void) | null = null;
+export const setPlayerReset = (reset: () => void) => {
+    injectedPlayerReset = reset;
+};
+
+const getPlayerReset = () => {
+    if (injectedPlayerReset) return injectedPlayerReset;
+    return require('./playerStore').usePlayerStore.getState().reset;
+};
+
 export const useAuthStore = create<AuthState>()(
     persist(
         (set) => ({
@@ -85,8 +110,7 @@ export const useAuthStore = create<AuthState>()(
             setServerUrl: (url) => set({ serverUrl: url }),
             login: (user) => set({ user, isAuthenticated: true }),
             logout: () => {
-                const { usePlayerStore } = require('./playerStore');
-                usePlayerStore.getState().reset();
+                getPlayerReset()();
                 set({ user: null, isAuthenticated: false, serverUrl: null });
             },
         }),
@@ -94,7 +118,7 @@ export const useAuthStore = create<AuthState>()(
             name: 'auth-storage',
             storage: createJSONStorage(() => secureAuthStorage),
         }
-    )
+    ),
 );
 
 // Start listeners

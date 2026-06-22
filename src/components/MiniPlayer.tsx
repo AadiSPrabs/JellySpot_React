@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { Surface, Text, useTheme } from 'react-native-paper';
+import MarqueeText from './MarqueeText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Play, Pause, Music, Headphones, Monitor } from 'lucide-react-native';
 import { LiquidMiniProgressBar } from './LiquidMiniProgressBar';
@@ -316,7 +317,7 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
                             </View>
                         )}
                         <Animated.View style={[styles.textContainer, { transform: [{ translateX: textTranslateX }], opacity: textOpacity }]}>
-                            <Text variant="titleSmall" numberOfLines={1} style={styles.titleText}>{trackToRender.name}</Text>
+                            <MarqueeText text={trackToRender.name} variant="titleSmall" style={styles.titleText} />
                             <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{trackToRender.artist}</Text>
                         </Animated.View>
 

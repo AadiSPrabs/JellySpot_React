@@ -7,3 +7,6 @@ const expoDb = openDatabaseSync('jellyspot.db');
 
 // Initialize Drizzle ORM
 export const db = drizzle(expoDb, { schema });
+
+// Export the raw SQLite database for direct SQL access
+export const sqliteDb = expoDb;

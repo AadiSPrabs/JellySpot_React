@@ -1,6 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { Text } from 'react-native-paper';
+import { Text, useTheme } from 'react-native-paper';
 import { AlertTriangle, RotateCcw } from 'lucide-react-native';
 
 interface Props {
@@ -10,6 +10,36 @@ interface Props {
 interface State {
     hasError: boolean;
     error: Error | null;
+}
+
+function ErrorScreen({ error, onRestart }: { error: Error | null; onRestart: () => void }) {
+    const theme = useTheme();
+    return (
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            <AlertTriangle size={64} color={theme.colors.error} />
+            <Text variant="headlineMedium" style={[styles.title, { color: theme.colors.onSurface }]}>
+                Something went wrong
+            </Text>
+            <Text variant="bodyMedium" style={[styles.message, { color: theme.colors.onSurfaceVariant }]}>
+                The app encountered an unexpected error. Please try restarting.
+            </Text>
+            {__DEV__ && error && (
+                <Text variant="bodySmall" style={[styles.errorDetail, { color: theme.colors.error, backgroundColor: theme.colors.surfaceVariant }]}>
+                    {error.message}
+                </Text>
+            )}
+            <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.colors.primary }]}
+                onPress={onRestart}
+                activeOpacity={0.7}
+            >
+                <RotateCcw size={20} color={theme.colors.onPrimary} />
+                <Text variant="labelLarge" style={[styles.buttonText, { color: theme.colors.onPrimary }]}>
+                    Try Again
+                </Text>
+            </TouchableOpacity>
+        </View>
+    );
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -27,38 +57,12 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     handleRestart = () => {
-        // Reset state and re-render children
         this.setState({ hasError: false, error: null });
     };
 
     render() {
         if (this.state.hasError) {
-            return (
-                <View style={styles.container}>
-                    <AlertTriangle size={64} color="#FF6B6B" />
-                    <Text variant="headlineMedium" style={styles.title}>
-                        Something went wrong
-                    </Text>
-                    <Text variant="bodyMedium" style={styles.message}>
-                        The app encountered an unexpected error. Please try restarting.
-                    </Text>
-                    {__DEV__ && this.state.error && (
-                        <Text variant="bodySmall" style={styles.errorDetail}>
-                            {this.state.error.message}
-                        </Text>
-                    )}
-                    <TouchableOpacity
-                        style={styles.button}
-                        onPress={this.handleRestart}
-                        activeOpacity={0.7}
-                    >
-                        <RotateCcw size={20} color="#FFFFFF" />
-                        <Text variant="labelLarge" style={styles.buttonText}>
-                            Try Again
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            );
+            return <ErrorScreen error={this.state.error} onRestart={this.handleRestart} />;
         }
 
         return this.props.children;
@@ -70,25 +74,20 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#1C1B1F',
         padding: 32,
     },
     title: {
-        color: '#E6E1E5',
         marginTop: 24,
         textAlign: 'center',
     },
     message: {
-        color: '#CAC4D0',
         marginTop: 12,
         textAlign: 'center',
         lineHeight: 22,
     },
     errorDetail: {
-        color: '#FF6B6B',
         marginTop: 16,
         padding: 12,
-        backgroundColor: '#2D2D2D',
         borderRadius: 8,
         fontFamily: 'monospace',
         maxWidth: '100%',
@@ -96,7 +95,6 @@ const styles = StyleSheet.create({
     button: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#4F378B',
         paddingHorizontal: 24,
         paddingVertical: 14,
         borderRadius: 28,
@@ -104,6 +102,5 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     buttonText: {
-        color: '#FFFFFF',
     },
 });

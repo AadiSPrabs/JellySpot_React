@@ -1,56 +1,63 @@
-import { NavigatorScreenParams } from '@react-navigation/native';
+import { NavigatorScreenParams } from "@react-navigation/native";
 
 export type RootStackParamList = {
     Auth: undefined;
     Main: NavigatorScreenParams<MainTabParamList>;
-    Player: undefined;
     Queue: undefined;
+    Settings: undefined;
+    Stats: undefined;
+    Appearance: undefined;
+    PlaybackSettings: undefined;
+    StorageSettings: undefined;
+    SourceModeSettings: undefined;
+    DownloadSettings: undefined;
+    Dependencies: undefined;
 };
 
 export type AuthStackParamList = {
-    ServerSelect: undefined;
-    Login: undefined;
+  ServerSelect: undefined;
+  Login: undefined;
 };
 
 export type MainTabParamList = {
-    HomeStack: NavigatorScreenParams<HomeStackParamList>;
-    SearchStack: NavigatorScreenParams<SearchStackParamList>;
-    LibraryStack: NavigatorScreenParams<LibraryStackParamList>;
-    DownloadsStack: NavigatorScreenParams<DownloadsStackParamList>;
+  HomeStack: NavigatorScreenParams<HomeStackParamList>;
+  SearchStack: NavigatorScreenParams<SearchStackParamList>;
+  LibraryStack: NavigatorScreenParams<LibraryStackParamList>;
+  DownloadsStack: NavigatorScreenParams<DownloadsStackParamList>;
 };
 
 export type HomeStackParamList = {
-    Home: undefined;
-    Detail: { itemId: string; type: string };
-    Settings: undefined;
-    Stats: undefined;
-    Appearance: undefined;
-    PlaybackSettings: undefined;
-    StorageSettings: undefined;
-    SourceModeSettings: undefined;
-    DownloadSettings: undefined;
-    Dependencies: undefined;
+  Home: undefined;
+  Detail: { itemId: string; type: string };
+  Settings: undefined;
+  Stats: undefined;
+  Appearance: undefined;
+  PlaybackSettings: undefined;
+  StorageSettings: undefined;
+  SourceModeSettings: undefined;
+  DownloadSettings: undefined;
+  Dependencies: undefined;
 };
 
 export type SearchStackParamList = {
-    Search: undefined;
-    Detail: { itemId: string; type: string };
-    Dependencies: undefined;
+  Search: undefined;
+  Detail: { itemId: string; type: string };
+  Dependencies: undefined;
 };
 
 export type LibraryStackParamList = {
-    Library: undefined;
-    Detail: { itemId: string; type: string };
-    Settings: undefined;
-    Stats: undefined;
-    Appearance: undefined;
-    PlaybackSettings: undefined;
-    StorageSettings: undefined;
-    SourceModeSettings: undefined;
-    DownloadSettings: undefined;
-    Dependencies: undefined;
+  Library: undefined;
+  Detail: { itemId: string; type: string };
+  Settings: undefined;
+  Stats: undefined;
+  Appearance: undefined;
+  PlaybackSettings: undefined;
+  StorageSettings: undefined;
+  SourceModeSettings: undefined;
+  DownloadSettings: undefined;
+  Dependencies: undefined;
 };
 
 export type DownloadsStackParamList = {
-    Downloads: undefined;
+  Downloads: undefined;
 };

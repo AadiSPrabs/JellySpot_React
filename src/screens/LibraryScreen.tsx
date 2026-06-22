@@ -26,6 +26,8 @@ import Animated, {
     runOnJS
 } from 'react-native-reanimated';
 
+type ItemType = 'playlist' | 'artist' | 'album' | 'library-item';
+
 type FilterType = 'playlists' | 'artists' | 'albums';
 
 interface PageProps {
@@ -33,12 +35,12 @@ interface PageProps {
     pageWidth: number;
     numColumns: number;
     dataSource: 'local' | 'jellyfin';
-    navigation: any;
-    theme: any;
     refreshCounter?: number;
 }
 
-const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, theme, navigation, onLongPress }: any) => {
+const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, onLongPress }: any) => {
+    const theme = useTheme();
+    const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
     const handleItemPress = (item: any) => {
         if (item.id === 'all-songs') {
             navigation.navigate('Detail', { itemId: 'all-songs', type: 'All Songs' });
@@ -110,7 +112,7 @@ const LibraryItem = React.memo(({ item, isLandscape, pageWidth, numColumns, them
     );
 });
 
-const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme, refreshCounter }: PageProps) => {
+const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, refreshCounter }: PageProps) => {
     const [playlists, setPlaylists] = React.useState<any[]>([]);
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
@@ -204,19 +206,30 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
         ];
     };
 
+    const renderPlaylistItem = React.useCallback(({ item }: { item: any }) => (
+        <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} onLongPress={handleLongPress} />
+    ), [isLandscape, pageWidth, numColumns, handleLongPress]);
+
+    const getPlaylistItemType = React.useCallback((item: any) => {
+        return item.id === 'all-songs' || item.id === 'liked-songs' ? 'library-item' : 'playlist';
+    }, []);
+
+    const theme = useTheme();
+
     if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
 
     return (
         <View style={{ width: pageWidth, flex: 1 }}>
             <FlashList
                 data={[...getStaticItems(), ...playlists]}
-                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} onLongPress={handleLongPress} />}
+                renderItem={renderPlaylistItem}
                 keyExtractor={(item) => (item.Id || item.id) + 'p'}
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
                 ListEmptyComponent={<EmptyState icon="music-note-off" title="No Playlists found" description="Create a playlist to get started" />}
                 estimatedItemSize={64}
+                getItemType={getPlaylistItemType}
             />
             
             <ActionSheet visible={isDeleteVisible} onClose={() => setIsDeleteVisible(false)} title="Playlist Options" heightPercentage={25}>
@@ -234,7 +247,7 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
     );
 });
 
-const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme }: PageProps) => {
+const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource }: PageProps) => {
     const [artists, setArtists] = React.useState<any[]>([]);
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
@@ -281,25 +294,32 @@ const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource,
         fetchArtists();
     }, [dataSource]);
 
+    const renderArtistItem = React.useCallback(({ item }: { item: any }) => (
+        <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} />
+    ), [isLandscape, pageWidth, numColumns]);
+
+    const theme = useTheme();
+
     if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
 
     return (
         <View style={{ width: pageWidth, flex: 1 }}>
             <FlashList
                 data={artists}
-                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
+                renderItem={renderArtistItem}
                 keyExtractor={(item) => (item.Id || item.id) + 'ar'}
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
                 ListEmptyComponent={<EmptyState icon="account-music" title="No Artists found" />}
                 estimatedItemSize={64}
+                getItemType={() => 'artist'}
             />
         </View>
     );
 });
 
-const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, navigation, theme }: PageProps) => {
+const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource }: PageProps) => {
     const [albums, setAlbums] = React.useState<any[]>([]);
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
@@ -346,19 +366,26 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource, 
         fetchAlbums();
     }, [dataSource]);
 
+    const renderAlbumItem = React.useCallback(({ item }: { item: any }) => (
+        <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} />
+    ), [isLandscape, pageWidth, numColumns]);
+
+    const theme = useTheme();
+
     if (isLoading) return <View style={{ width: pageWidth, padding: 16 }}><ListItemSkeleton /><ListItemSkeleton /></View>;
 
     return (
         <View style={{ width: pageWidth, flex: 1 }}>
             <FlashList
                 data={albums}
-                renderItem={({ item }) => <LibraryItem item={item} isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} theme={theme} navigation={navigation} />}
+                renderItem={renderAlbumItem}
                 keyExtractor={(item) => (item.Id || item.id) + 'al'}
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
                 ListEmptyComponent={<EmptyState icon="album" title="No Albums found" />}
                 estimatedItemSize={64}
+                getItemType={() => 'album'}
             />
         </View>
     );
@@ -481,9 +508,9 @@ const LibraryScreen = React.memo(function LibraryScreen() {
                 decelerationRate="fast"
                 removeClippedSubviews={true}
             >
-                <PlaylistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} refreshCounter={refreshCounter} />
-                <ArtistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
-                <AlbumPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} navigation={navigation} theme={theme} />
+                <PlaylistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} refreshCounter={refreshCounter} />
+                <ArtistPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} />
+                <AlbumPage isLandscape={isLandscape} pageWidth={pageWidth} numColumns={numColumns} dataSource={dataSource} />
             </Animated.ScrollView>
 
             <Portal>

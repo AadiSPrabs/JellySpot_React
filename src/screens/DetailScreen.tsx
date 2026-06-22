@@ -1,36 +1,66 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, ActivityIndicator, ScrollView, Pressable, Text as RNText, Animated, InteractionManager } from 'react-native';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
-import { Image } from 'expo-image';
-import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
-import { RootStackParamList } from '../types/navigation';
-import { jellyfinApi } from '../api/jellyfin';
-import { usePlayerStore } from '../store/playerStore';
-import { useSettingsStore } from '../store/settingsStore';
-import { useShallow } from 'zustand/react/shallow';
-import { useLocalLibraryStore } from '../store/localLibraryStore';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Text, Button, List, IconButton, useTheme, Surface, Portal, Dialog, TouchableRipple, Avatar, TextInput, Menu } from 'react-native-paper';
-import { LinearGradient } from 'expo-linear-gradient';
-import { EqualizerAnimation } from '../components/EqualizerAnimation';
-import { Loader } from '../components/Loader';
-import { Skeleton, ListItemSkeleton, CardSkeleton } from '../components/Skeleton';
-import { ShuffleFab } from '../components/ShuffleFab';
-import { DatabaseService } from '../services/DatabaseService';
-import { downloadService } from '../services/DownloadService';
-import { SongItem } from '../components/SongItem';
-import { dialogStyles } from '../utils/dialogStyles';
-import ActionSheet from '../components/ActionSheet';
-import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
-import ImageColors from 'react-native-image-colors';
-import { lightenHexColor } from '../utils/colorUtils';
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  ScrollView,
+  Pressable,
+  Text as RNText,
+  Animated,
+  InteractionManager,
+} from "react-native";
+import DraggableFlatList, {
+  RenderItemParams,
+} from "react-native-draggable-flatlist";
+import { Image } from "expo-image";
+import { useRoute, useNavigation, RouteProp } from "@react-navigation/native";
+import { RootStackParamList } from "../types/navigation";
+import { jellyfinApi } from "../api/jellyfin";
+import { usePlayerStore } from "../store/playerStore";
+import { useSettingsStore } from "../store/settingsStore";
+import { useShallow } from "zustand/react/shallow";
+import { useLocalLibraryStore } from "../store/localLibraryStore";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import {
+  Text,
+  Button,
+  List,
+  IconButton,
+  useTheme,
+  Surface,
+  Portal,
+  Dialog,
+  TouchableRipple,
+  Avatar,
+  TextInput,
+  Menu,
+} from "react-native-paper";
+import { LinearGradient } from "expo-linear-gradient";
+import { EqualizerAnimation } from "../components/EqualizerAnimation";
+import { Loader } from "../components/Loader";
+import {
+  Skeleton,
+  ListItemSkeleton,
+  CardSkeleton,
+} from "../components/Skeleton";
+import { ShuffleFab } from "../components/ShuffleFab";
+import { DatabaseService } from "../services/DatabaseService";
+import { downloadService } from "../services/DownloadService";
+import { SongItem } from "../components/SongItem";
+import { dialogStyles } from "../utils/dialogStyles";
+import ActionSheet from "../components/ActionSheet";
+import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import ImageColors from "react-native-image-colors";
+import { lightenHexColor } from "../utils/colorUtils";
 
+import { HomeStackParamList } from "../types/navigation";
 
-import { HomeStackParamList } from '../types/navigation';
+type DetailScreenRouteProp = RouteProp<HomeStackParamList, "Detail">;
 
-type DetailScreenRouteProp = RouteProp<HomeStackParamList, 'Detail'>;
-
-import { Alert, RefreshControl } from 'react-native';
+import { Alert, RefreshControl } from "react-native";
 
 const DetailScreen = React.memo(function DetailScreen() {
     const route = useRoute<DetailScreenRouteProp>();
@@ -62,16 +92,16 @@ const DetailScreen = React.memo(function DetailScreen() {
         if (!cache) return;
         const now = Date.now();
         const entries = Object.entries(cache) as [string, any][];
-        
+
         // Remove expired entries
         let valid = entries.filter(([_, v]) => now - v.timestamp < CACHE_TTL);
-        
+
         // If still over limit, keep only the most recent MAX_CACHE_ENTRIES
         if (valid.length > MAX_CACHE_ENTRIES) {
             valid.sort((a, b) => b[1].timestamp - a[1].timestamp);
             valid = valid.slice(0, MAX_CACHE_ENTRIES);
         }
-        
+
         // Rebuild cache with only valid entries
         (global as any).detailCache = Object.fromEntries(valid);
     };
@@ -110,7 +140,7 @@ const DetailScreen = React.memo(function DetailScreen() {
 
     const filteredTracks = useMemo(() => {
         let result = [...tracks];
-        
+
         // Apply search filter
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
@@ -178,6 +208,7 @@ const DetailScreen = React.memo(function DetailScreen() {
     const [startIndex, setStartIndex] = useState(0);
     const [hasMore, setHasMore] = useState(true);
     const [isFetchingMore, setIsFetchingMore] = useState(false);
+    const [totalTrackCount, setTotalTrackCount] = useState(0);
     const PAGE_LIMIT = 100;
 
     const loadMoreTracks = React.useCallback(() => {
@@ -341,7 +372,7 @@ const DetailScreen = React.memo(function DetailScreen() {
 
     const getPlaylistRandomColor = () => {
         const vibrantColors = [
-            '#FF4D4D', '#FF9E4D', '#FFD74D', '#4DFF88', 
+            '#FF4D4D', '#FF9E4D', '#FFD74D', '#4DFF88',
             '#4DFFFF', '#4D88FF', '#9E4DFF', '#FF4DFF',
             '#FF4D88', '#4DFFD7'
         ];
@@ -549,27 +580,27 @@ const DetailScreen = React.memo(function DetailScreen() {
                     itemsData = await jellyfinApi.getPlaylistItems(itemId);
                 } else if (type === 'MusicGenre') {
                     // First, fetch artists that belong to this genre
-                    const artistsRes = await jellyfinApi.getItems({ 
-                        GenreIds: itemId, 
-                        IncludeItemTypes: 'MusicArtist', 
-                        Recursive: true, 
-                        SortBy: 'SortName' 
+                    const artistsRes = await jellyfinApi.getItems({
+                        GenreIds: itemId,
+                        IncludeItemTypes: 'MusicArtist',
+                        Recursive: true,
+                        SortBy: 'SortName'
                     });
                     const artists = artistsRes.Items || [];
                     finalSimilarArtists = artists;
                     setSimilarArtists(artists);
 
                     if (artists.length > 0) {
-                        const artistIds = artists.map(a => a.Id).join(',');
-                        
+                        const artistIds = artists.map((a: any) => a.Id).join(',');
+
                         // Fetch albums by these artists
                         try {
-                            const albumsRes = await jellyfinApi.getItems({ 
-                                ArtistIds: artistIds, 
-                                IncludeItemTypes: 'MusicAlbum', 
-                                Recursive: true, 
-                                SortBy: 'ProductionYear,SortName', 
-                                SortOrder: 'Descending' 
+                            const albumsRes = await jellyfinApi.getItems({
+                                ArtistIds: artistIds,
+                                IncludeItemTypes: 'MusicAlbum',
+                                Recursive: true,
+                                SortBy: 'ProductionYear,SortName',
+                                SortOrder: 'Descending'
                             });
                             finalArtistAlbums = albumsRes.Items || [];
                             setArtistAlbums(finalArtistAlbums);
@@ -579,10 +610,10 @@ const DetailScreen = React.memo(function DetailScreen() {
 
                         // Fetch songs by these artists
                         try {
-                            itemsData = await jellyfinApi.getItems({ 
-                                ArtistIds: artistIds, 
-                                IncludeItemTypes: 'Audio', 
-                                Recursive: true, 
+                            itemsData = await jellyfinApi.getItems({
+                                ArtistIds: artistIds,
+                                IncludeItemTypes: 'Audio',
+                                Recursive: true,
                                 SortBy: 'SortName',
                                 Limit: PAGE_LIMIT,
                                 StartIndex: currentStartIndex
@@ -603,7 +634,7 @@ const DetailScreen = React.memo(function DetailScreen() {
                 } else {
                     itemsData = await jellyfinApi.getItems({ ParentId: itemId, IncludeItemTypes: 'Audio', Recursive: true, SortBy: 'ParentIndexNumber,IndexNumber', Limit: PAGE_LIMIT, StartIndex: currentStartIndex });
                 }
-                
+
                 if (currentStartIndex > 0) {
                     finalTracks = [...tracks, ...(itemsData.Items || [])];
                     setTracks(prev => [...prev, ...(itemsData.Items || [])]);
@@ -611,7 +642,11 @@ const DetailScreen = React.memo(function DetailScreen() {
                     finalTracks = itemsData.Items || [];
                     setTracks(itemsData.Items || []);
                 }
-                
+
+                // Track total count from server (first page only)
+                if (currentStartIndex === 0 && itemsData.TotalRecordCount != null) {
+                    setTotalTrackCount(itemsData.TotalRecordCount);
+                }
                 // If itemsData doesn't have exactly PAGE_LIMIT, there are no more pages
                 setHasMore((itemsData.Items?.length || 0) === PAGE_LIMIT);
             }
@@ -1015,17 +1050,16 @@ const DetailScreen = React.memo(function DetailScreen() {
         if (tracks.length === 0) return;
 
         const { queueLimit } = useSettingsStore.getState();
-        const fetchLimit = queueLimit > 0 ? queueLimit : 1000;
 
         let songsToShuffle = tracks;
 
-        if (hasMore) {
+        if (dataSource === 'jellyfin') {
             try {
                 const params: any = {
                     IncludeItemTypes: 'Audio',
                     Recursive: true,
                     SortBy: 'Random',
-                    Limit: fetchLimit,
+                    Limit: Math.max(totalTrackCount || tracks.length, queueLimit || 2000),
                 };
 
                 if (itemId === 'all-songs') {
@@ -1044,7 +1078,6 @@ const DetailScreen = React.memo(function DetailScreen() {
                 }
             } catch (error) {
                 console.error('Failed to fetch random songs for shuffle:', error);
-                // Fallback to current tracks
                 songsToShuffle = tracks;
             }
         }
@@ -1054,7 +1087,7 @@ const DetailScreen = React.memo(function DetailScreen() {
         // Enable shuffle mode in the store (this shuffles the already-mapped queue)
         const store = usePlayerStore.getState();
         if (!store.shuffleMode) {
-            store.toggleShuffle();
+            store.toggleShuffle(false);
         }
         // Play the first track in the now-shuffled queue
         const shuffledQueue = usePlayerStore.getState().queue;
@@ -1066,6 +1099,10 @@ const DetailScreen = React.memo(function DetailScreen() {
     }, [openTrackMenu, item]);
 
     const isDraggable = item?.Type === 'Playlist' && dataSource === 'local' && itemId !== 'liked-songs' && itemId !== 'all-songs';
+
+    const getTrackImageUrl = React.useCallback((track: any) => {
+        return track.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(track.Id) : undefined);
+    }, [dataSource]);
 
     const renderItem = React.useCallback(({ item: trackItem, getIndex, drag, isActive }: RenderItemParams<any>) => {
         const index = getIndex() ?? 0;
@@ -1085,11 +1122,10 @@ const DetailScreen = React.memo(function DetailScreen() {
                 showEqualizer={true}
                 drag={isDraggable && !isSelectionMode ? drag : undefined}
                 isActive={isActive}
-                // DetailScreen specific:
-                getImageUrl={(t) => t.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : undefined)}
+                getImageUrl={getTrackImageUrl}
             />
         );
-    }, [handleTrackPress, handleOpenDialog, item, currentTrack, isPlaying, isSelectionMode, selectedTracks, dataSource, isDraggable, toggleTrackSelection, handleLongPress]);
+    }, [handleTrackPress, handleOpenDialog, item, currentTrack, isPlaying, isSelectionMode, selectedTracks, isDraggable, toggleTrackSelection, handleLongPress, getTrackImageUrl]);
 
     const headerImage = useMemo(() => {
         if (!item) return null;
@@ -1103,605 +1139,1313 @@ const DetailScreen = React.memo(function DetailScreen() {
         return null;
     }, [item?.Id, item?.ImageUrl, dataSource, tracks.length > 0 ? tracks[0].ImageUrl : null]);
 
-    if (loading || !item) {
-        return <Loader />;
-    }
 
-    const renderArtistHeader = () => {
-        const backdropUrl = dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(item.Id, 'Backdrop') : headerImage;
-        return (
-            <View style={{ marginBottom: 24 }}>
-                {backdropUrl && (
-                    <View style={{ width: '100%', height: 300, position: 'absolute', top: 0 }}>
-                        <Image source={{ uri: backdropUrl }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-                        <LinearGradient colors={['transparent', theme.colors.background]} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 180 }} />
-                    </View>
-                )}
+  if (loading || !item) {
+    return <Loader />;
+  }
 
-                <View style={[styles.header, { paddingTop: backdropUrl ? 200 : 20, marginBottom: 16 }]}>
-                    <Text variant="displaySmall" style={[styles.title, { fontWeight: '900' }]}>{item.Name}</Text>
-                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                        {tracks.length} Top Tracks
-                    </Text>
+  const renderArtistHeader = () => {
+    const backdropUrl =
+      dataSource === "jellyfin"
+        ? jellyfinApi.getImageUrl(item.Id, "Backdrop")
+        : headerImage;
+    return (
+      <View style={{ marginBottom: 24 }}>
+        {backdropUrl && (
+          <View
+            style={{ width: "100%", height: 300, position: "absolute", top: 0 }}
+          >
+            <Image
+              source={{ uri: backdropUrl }}
+              style={{ width: "100%", height: "100%" }}
+              contentFit="cover"
+            />
+            <LinearGradient
+              colors={["transparent", theme.colors.background]}
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: 180,
+              }}
+            />
+          </View>
+        )}
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, width: '100%', justifyContent: 'center', gap: 12 }}>
-                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
-                        <ShuffleFab size={48} onPress={handleShufflePlay} />
-                        <IconButton
-                            icon="sort-variant"
-                            size={28}
-                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
-                            onPress={() => setIsSortMenuVisible(true)}
-                        />
-                        {dataSource !== 'local' && tracks.length > 0 ? (
-                            <IconButton 
-                                icon="download" 
-                                size={28} 
-                                style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }} 
-                                onPress={() => setIsDownloadConfirmVisible(true)} 
-                            />
-                        ) : null}
-                    </View>
+        <View
+          style={[
+            styles.header,
+            { paddingTop: backdropUrl ? 200 : 20, marginBottom: 16 },
+          ]}
+        >
+          <Text
+            variant="displaySmall"
+            style={[styles.title, { fontWeight: "900" }]}
+          >
+            {item.Name}
+          </Text>
+          <Text
+            variant="bodyMedium"
+            style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}
+          >
+            {tracks.length} Top Tracks
+          </Text>
 
-                </View>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginTop: 24,
+              width: "100%",
+              justifyContent: "center",
+              gap: 12,
+            }}
+          >
+            <Button
+              mode="contained"
+              icon="play"
+              onPress={handlePlayAll}
+              style={[styles.playButton, { marginTop: 0 }]}
+              contentStyle={{ paddingHorizontal: 16 }}
+            >
+              Play
+            </Button>
+            <ShuffleFab size={48} onPress={handleShufflePlay} />
+            <IconButton
+              icon="sort-variant"
+              size={28}
+              style={{
+                backgroundColor: theme.colors.surfaceVariant,
+                margin: 0,
+              }}
+              onPress={() => setIsSortMenuVisible(true)}
+            />
+            {dataSource !== "local" && tracks.length > 0 ? (
+              <IconButton
+                icon="download"
+                size={28}
+                style={{
+                  backgroundColor: theme.colors.surfaceVariant,
+                  margin: 0,
+                }}
+                onPress={() => setIsDownloadConfirmVisible(true)}
+              />
+            ) : null}
+          </View>
+        </View>
 
-                {!!item.Overview && (
-                    <Pressable style={{ paddingHorizontal: 20, marginBottom: 24 }} onPress={() => setIsBioExpanded(!isBioExpanded)}>
-                        <Text variant="labelLarge" style={{ color: theme.colors.primary, marginBottom: 8 }}>ABOUT</Text>
-                        <Text variant="bodyMedium" numberOfLines={isBioExpanded ? undefined : 3} style={{ color: theme.colors.onSurfaceVariant, lineHeight: 20 }}>
-                            {item.Overview}
-                        </Text>
-                    </Pressable>
-                )}
+        {!!item.Overview && (
+          <Pressable
+            style={{ paddingHorizontal: 20, marginBottom: 24 }}
+            onPress={() => setIsBioExpanded(!isBioExpanded)}
+          >
+            <Text
+              variant="labelLarge"
+              style={{ color: theme.colors.primary, marginBottom: 8 }}
+            >
+              ABOUT
+            </Text>
+            <Text
+              variant="bodyMedium"
+              numberOfLines={isBioExpanded ? undefined : 3}
+              style={{ color: theme.colors.onSurfaceVariant, lineHeight: 20 }}
+            >
+              {item.Overview}
+            </Text>
+          </Pressable>
+        )}
 
-                {artistAlbums.length > 0 ? (
-                    <View style={{ marginBottom: 24 }}>
-                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Albums & EPs</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
-                            {artistAlbums.map((album) => (
-                                <Pressable key={album.Id} style={{ width: 140 }} onPress={() => (navigation as any).navigate('Detail', { itemId: album.Id, type: 'MusicAlbum' })}>
-                                    <Image source={{ uri: jellyfinApi.getImageUrl(album.Id) }} style={{ width: 140, height: 140, borderRadius: 8, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
-                                    <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: 'bold' }}>{album.Name}</Text>
-                                    <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{album.ProductionYear || 'Album'}</Text>
-                                </Pressable>
-                            ))}
-                        </ScrollView>
-                    </View>
-                ) : null}
+        {artistAlbums.length > 0 ? (
+          <View style={{ marginBottom: 24 }}>
+            <Text
+              variant="titleMedium"
+              style={{
+                paddingHorizontal: 20,
+                marginLeft: 20,
+                marginBottom: 12,
+                fontWeight: "bold",
+              }}
+            >
+              Albums & EPs
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}
+            >
+              {artistAlbums.map((album) => (
+                <Pressable
+                  key={album.Id}
+                  style={{ width: 140 }}
+                  onPress={() =>
+                    (navigation as any).navigate("Detail", {
+                      itemId: album.Id,
+                      type: "MusicAlbum",
+                    })
+                  }
+                >
+                  <Image
+                    source={{ uri: jellyfinApi.getImageUrl(album.Id) }}
+                    style={{
+                      width: 140,
+                      height: 140,
+                      borderRadius: 8,
+                      marginBottom: 8,
+                      backgroundColor: theme.colors.surfaceVariant,
+                    }}
+                  />
+                  <Text
+                    variant="bodyMedium"
+                    numberOfLines={1}
+                    style={{ fontWeight: "bold" }}
+                  >
+                    {album.Name}
+                  </Text>
+                  <Text
+                    variant="bodySmall"
+                    numberOfLines={1}
+                    style={{ color: theme.colors.onSurfaceVariant }}
+                  >
+                    {album.ProductionYear || "Album"}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
-                {similarArtists.length > 0 ? (
-                    <View style={{ marginBottom: 24 }}>
-                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Similar Artists</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
-                            {similarArtists.map((artist) => (
-                                <Pressable key={artist.Id} style={{ width: 100, alignItems: 'center' }} onPress={() => (navigation as any).push('Detail', { itemId: artist.Id, type: 'MusicArtist' })}>
-                                    <Image source={{ uri: jellyfinApi.getImageUrl(artist.Id) }} style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
-                                    <Text variant="bodySmall" numberOfLines={2} style={{ textAlign: 'center' }}>{artist.Name}</Text>
-                                </Pressable>
-                            ))}
-                        </ScrollView>
-                    </View>
-                ) : null}
+        {similarArtists.length > 0 ? (
+          <View style={{ marginBottom: 24 }}>
+            <Text
+              variant="titleMedium"
+              style={{
+                paddingHorizontal: 20,
+                marginLeft: 20,
+                marginBottom: 12,
+                fontWeight: "bold",
+              }}
+            >
+              Similar Artists
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}
+            >
+              {similarArtists.map((artist) => (
+                <Pressable
+                  key={artist.Id}
+                  style={{ width: 100, alignItems: "center" }}
+                  onPress={() =>
+                    (navigation as any).push("Detail", {
+                      itemId: artist.Id,
+                      type: "MusicArtist",
+                    })
+                  }
+                >
+                  <Image
+                    source={{ uri: jellyfinApi.getImageUrl(artist.Id) }}
+                    style={{
+                      width: 100,
+                      height: 100,
+                      borderRadius: 50,
+                      marginBottom: 8,
+                      backgroundColor: theme.colors.surfaceVariant,
+                    }}
+                  />
+                  <Text
+                    variant="bodySmall"
+                    numberOfLines={2}
+                    style={{ textAlign: "center" }}
+                  >
+                    {artist.Name}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
-                <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 8, fontWeight: 'bold' }}>Top Tracks</Text>
-            </View>
-        );
-    };
+        <Text
+          variant="titleMedium"
+          style={{
+            paddingHorizontal: 20,
+            marginLeft: 20,
+            marginBottom: 8,
+            fontWeight: "bold",
+          }}
+        >
+          Top Tracks
+        </Text>
+      </View>
+    );
+  };
 
-    const renderPlaylistHeader = () => {
-        const uniqueArts = Array.from(new Set(tracks.map(t => dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(t.Id) : t.ImageUrl).filter(Boolean)));
-        const collageArts = uniqueArts.slice(0, 4);
-
-        return (
-            <View style={styles.header}>
-                {!headerImage ? (
-                    collageArts.length >= 4 ? (
-                        <Surface style={[styles.artwork, { borderRadius: 12, overflow: 'hidden' }]} elevation={4}>
-                            <View style={{ width: 200, height: 200, flexDirection: 'row', flexWrap: 'wrap' }}>
-                                {collageArts.map((uri, i) => (
-                                    <Image key={i} source={{ uri }} style={{ width: 100, height: 100 }} />
-                                ))}
-                            </View>
-                        </Surface>
-                    ) : (
-                        <Surface style={[styles.artwork, { borderRadius: 12, elevation: 4, backgroundColor: theme.colors.surfaceVariant }]} elevation={4}>
-                            <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                                <Avatar.Icon size={80} icon={item.Id === 'liked-songs' ? 'heart' : 'playlist-music'} color={theme.colors.onSurfaceVariant} style={{ backgroundColor: 'transparent' }} />
-                            </View>
-                        </Surface>
-                    )
-                ) : (
-                    <Surface style={styles.artwork} elevation={4}>
-                        <Image source={{ uri: headerImage }} style={{ width: 200, height: 200, borderRadius: 12 }} />
-                    </Surface>
-                )}
-                <Text variant="headlineMedium" style={styles.title}>{item.Name}</Text>
-
-                {!!item.Overview && (
-                    <Text variant="bodyMedium" numberOfLines={3} style={{ color: theme.colors.onSurfaceVariant, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 }}>
-                        {item.Overview}
-                    </Text>
-                )}
-
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 12 }}>
-                    <Surface style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.colors.surfaceVariant }}>
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>Playlist</Text>
-                    </Surface>
-                    <Surface style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.colors.surfaceVariant }}>
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>{tracks.length} songs</Text>
-                    </Surface>
-                    <Surface style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.colors.surfaceVariant }}>
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>{formatDuration(tracks.reduce((acc, t) => acc + (t.RunTimeTicks || 0), 0))}</Text>
-                    </Surface>
-                </View>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, paddingHorizontal: 20, width: '100%', justifyContent: 'center', gap: 12 }}>
-                    <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
-                    <ShuffleFab size={48} onPress={handleShufflePlay} />
-                    <IconButton
-                        icon="sort-variant"
-                        size={28}
-                        style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
-                        onPress={() => setIsSortMenuVisible(true)}
-                    />
-                    {dataSource !== 'local' && tracks.length > 0 ? (
-                        <IconButton 
-                            icon="download" 
-                            size={28} 
-                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }} 
-                            onPress={() => setIsDownloadConfirmVisible(true)} 
-                        />
-                    ) : null}
-                </View>
-
-
-                <View style={{ paddingHorizontal: 20, marginTop: 24, width: '100%', marginBottom: 8 }}>
-                    <TextInput
-                        mode="outlined"
-                        placeholder="Find in playlist"
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                        left={<TextInput.Icon icon="magnify" />}
-                        style={{ backgroundColor: theme.colors.surface, height: 40 }}
-                        dense
-                    />
-                </View>
-            </View>
-        );
-    };
-
-    const renderGenreHeader = () => {
-        return (
-            <View style={{ marginBottom: 24 }}>
-                <View style={[styles.header, { paddingTop: 20, marginBottom: 16 }]}>
-                    <Surface style={[styles.artwork, { borderRadius: 12, elevation: 4, backgroundColor: theme.colors.surfaceVariant }]} elevation={4}>
-                        <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                            <Avatar.Icon size={80} icon="music-box-outline" color={theme.colors.onSurfaceVariant} style={{ backgroundColor: 'transparent' }} />
-                        </View>
-                    </Surface>
-                    <Text variant="displaySmall" style={[styles.title, { fontWeight: '900' }]}>{item.Name}</Text>
-                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                        Genre • {tracks.length} Songs
-                    </Text>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, width: '100%', justifyContent: 'center', gap: 12 }}>
-                        <Button mode="contained" icon="play" onPress={handlePlayAll} style={[styles.playButton, { marginTop: 0 }]} contentStyle={{ paddingHorizontal: 16 }}>Play</Button>
-                        <ShuffleFab size={48} onPress={handleShufflePlay} />
-                        <IconButton
-                            icon="sort-variant"
-                            size={28}
-                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
-                            onPress={() => setIsSortMenuVisible(true)}
-                        />
-                        {dataSource !== 'local' && tracks.length > 0 ? (
-                            <IconButton 
-                                icon="download" 
-                                size={28} 
-                                style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }} 
-                                onPress={() => setIsDownloadConfirmVisible(true)} 
-                            />
-                        ) : null}
-                    </View>
-                </View>
-
-                {similarArtists.length > 0 ? (
-                    <View style={{ marginBottom: 24 }}>
-                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Artists in this Genre</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
-                            {similarArtists.map((artist) => (
-                                <Pressable key={artist.Id} style={{ width: 100, alignItems: 'center' }} onPress={() => (navigation as any).push('Detail', { itemId: artist.Id, type: 'MusicArtist' })}>
-                                    <Image source={{ uri: artist.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(artist.Id) : undefined) }} style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
-                                    <Text variant="bodySmall" numberOfLines={2} style={{ textAlign: 'center', fontWeight: 'bold' }}>{artist.Name}</Text>
-                                </Pressable>
-                            ))}
-                        </ScrollView>
-                    </View>
-                ) : null}
-
-                {artistAlbums.length > 0 ? (
-                    <View style={{ marginBottom: 24 }}>
-                        <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 12, fontWeight: 'bold' }}>Albums in this Genre</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
-                            {artistAlbums.map((album) => (
-                                <Pressable key={album.Id} style={{ width: 140 }} onPress={() => (navigation as any).navigate('Detail', { itemId: album.Id, type: 'MusicAlbum' })}>
-                                    <Image source={{ uri: album.ImageUrl || (dataSource === 'jellyfin' ? jellyfinApi.getImageUrl(album.Id) : undefined) }} style={{ width: 140, height: 140, borderRadius: 8, marginBottom: 8, backgroundColor: theme.colors.surfaceVariant }} />
-                                    <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: 'bold' }}>{album.Name}</Text>
-                                    <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{album.ProductionYear || 'Album'}</Text>
-                                </Pressable>
-                            ))}
-                        </ScrollView>
-                    </View>
-                ) : null}
-
-                <Text variant="titleMedium" style={{ paddingHorizontal: 20, marginLeft: 20, marginBottom: 8, fontWeight: 'bold' }}>Songs</Text>
-            </View>
-        );
-    };
-
-    const renderHeader = () => {
-        if (item.Type === 'MusicArtist') {
-            return renderArtistHeader();
-        }
-        if (item.Type === 'Playlist') {
-            return renderPlaylistHeader();
-        }
-        if (item.Type === 'MusicGenre') {
-            return renderGenreHeader();
-        }
-        return (
-            <View style={styles.header}>
-                {!headerImage ? (
-                    <Surface style={[styles.artwork, { borderRadius: 12, elevation: 4, backgroundColor: theme.colors.surfaceVariant }]} elevation={4}>
-                        <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                            <Avatar.Icon
-                                size={80}
-                                icon={item.Id === 'liked-songs' ? 'heart' : 'music'}
-                                color={theme.colors.onSurfaceVariant}
-                                style={{ backgroundColor: 'transparent' }}
-                            />
-                        </View>
-                    </Surface>
-                ) : (
-                    <Surface style={styles.artwork} elevation={4}>
-                        <Image
-                            source={{ uri: headerImage }}
-                            style={{ width: 200, height: 200, borderRadius: 12 }}
-                        />
-                    </Surface>
-                )}
-                <Text variant="headlineMedium" style={styles.title}>{item.Name}</Text>
-                <Text variant="titleMedium" style={{ color: theme.colors.onSurfaceVariant }}>{item.AlbumArtist || item.Artists?.[0] || type}</Text>
-                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                    {item.Type === 'MusicArtist' ? 'Artist' : item.ProductionYear || 'Playlist'} • {tracks.length} songs • {formatDuration(tracks.reduce((acc, t) => acc + (t.RunTimeTicks || 0), 0))}
-                </Text>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, width: '100%', justifyContent: 'center', gap: 12 }}>
-                    <Button
-                        mode="contained"
-                        icon="play"
-                        onPress={handlePlayAll}
-                        style={[styles.playButton, { marginTop: 0 }]}
-                        contentStyle={{ paddingHorizontal: 16 }}
-                    >
-                        Play
-                    </Button>
-                    <ShuffleFab
-                        size={48}
-                        onPress={handleShufflePlay}
-                    />
-                    <IconButton
-                        icon="sort-variant"
-                        size={28}
-                        style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
-                        onPress={() => setIsSortMenuVisible(true)}
-                    />
-
-                    {dataSource !== 'local' && tracks.length > 0 ? (
-                        <IconButton
-                            icon="download"
-                            size={28}
-                            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
-                            onPress={() => setIsDownloadConfirmVisible(true)}
-                        />
-                    ) : null}
-                </View>
-
-            </View>
-        );
-    };
-
-    const isArtist = item?.Type === 'MusicArtist';
+  const renderPlaylistHeader = () => {
+    const uniqueArts = Array.from(
+      new Set(
+        tracks
+          .map((t) =>
+            dataSource === "jellyfin"
+              ? jellyfinApi.getImageUrl(t.Id)
+              : t.ImageUrl,
+          )
+          .filter(Boolean),
+      ),
+    );
+    const collageArts = uniqueArts.slice(0, 4);
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-            {glowColor && (
-                <Animated.View
-                    style={{
-                        position: 'absolute',
-                        top: -100,
-                        left: -100,
-                        right: -100,
-                        height: 400,
-                        opacity: fadeAnim,
-                        transform: [{ translateY: slideAnim }],
-                    }}
-                >
-                    <LinearGradient
-                        colors={[`${glowColor}40`, 'transparent']}
-                        style={{ flex: 1 }}
-                    />
-                </Animated.View>
-            )}
-
-            <View style={[styles.appBar, { paddingTop: insets.top }, isSelectionMode && { backgroundColor: theme.colors.surface, elevation: 4 }, isArtist && !isSelectionMode && { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, backgroundColor: 'transparent' }]}>
-                {isSelectionMode ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'space-between' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <IconButton icon="close" onPress={exitSelectionMode} />
-                            <Text variant="titleMedium" style={{ marginLeft: 8 }}>
-                                {selectedTracks.size} selected
-                            </Text>
-                        </View>
-                        <View style={{ flexDirection: 'row' }}>
-                            <IconButton icon="download" onPress={handleDownloadSelected} />
-                            <IconButton icon="playlist-plus" onPress={handleAddSelectedToPlaylist} />
-                            {dataSource === 'local' && (
-                                <IconButton icon="delete" onPress={handleDeleteSelected} />
-                            )}
-                        </View>
-                    </View>
-                ) : (
-                    <IconButton icon="arrow-left" onPress={() => navigation.goBack()} style={{ backgroundColor: isArtist ? 'rgba(0,0,0,0.3)' : 'transparent' }} iconColor={isArtist ? '#fff' : undefined} />
-                )}
-            </View>
-
-            <DraggableFlatList
-                data={filteredTracks}
-                extraData={[filteredTracks, isSelectionMode, selectedTracks]} // CRITICAL: Force re-render when selection state changes
-                renderItem={renderItem}
-                // Don't use index in keys unless absolutely necessary, as it destroys components on reorder
-                keyExtractor={(item, index) => item.queueItemId || item.PlaylistItemId || `${item.Id}-${index}`}
-                ListHeaderComponent={renderHeader()}
-                contentContainerStyle={[styles.listContent, { paddingBottom: 200 }]}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
-                getItemLayout={(data, index) => (
-                    { length: 66, offset: 66 * index, index }
-                )}
-                initialNumToRender={8}
-                maxToRenderPerBatch={8}
-                windowSize={11}
-                removeClippedSubviews={true} // Free memory for offscreen items (CRITICAL for large playlists)
-                ListEmptyComponent={tracksLoading ? (
-                    <View style={{ paddingTop: 16 }}>
-                        {Array.from({ length: 10 }).map((_, i) => <ListItemSkeleton key={i} />)}
-                    </View>
-                ) : null}
-                onDragEnd={({ data }) => {
-                    setTracks(data); // Update UI
-                    if (isDraggable && itemId) {
-                        DatabaseService.updatePlaylistOrder(itemId, data.map(t => t.Id)).catch(console.error);
-                    }
+      <View style={styles.header}>
+        {!headerImage ? (
+          collageArts.length >= 4 ? (
+            <Surface
+              style={[styles.artwork, { borderRadius: 12, overflow: "hidden" }]}
+              elevation={4}
+            >
+              <View
+                style={{
+                  width: 200,
+                  height: 200,
+                  flexDirection: "row",
+                  flexWrap: "wrap",
                 }}
-                activationDistance={20}
-                onEndReached={loadMoreTracks}
-                onEndReachedThreshold={0.5}
-                ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginVertical: 16 }} /> : null}
+              >
+                {collageArts.map((uri, i) => (
+                  <Image
+                    key={i}
+                    source={{ uri }}
+                    style={{ width: 100, height: 100 }}
+                  />
+                ))}
+              </View>
+            </Surface>
+          ) : (
+            <Surface
+              style={[
+                styles.artwork,
+                {
+                  borderRadius: 12,
+                  elevation: 4,
+                  backgroundColor: theme.colors.surfaceVariant,
+                },
+              ]}
+              elevation={4}
+            >
+              <View
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <Avatar.Icon
+                  size={80}
+                  icon={item.Id === "liked-songs" ? "heart" : "playlist-music"}
+                  color={theme.colors.onSurfaceVariant}
+                  style={{ backgroundColor: "transparent" }}
+                />
+              </View>
+            </Surface>
+          )
+        ) : (
+          <Surface style={styles.artwork} elevation={4}>
+            <Image
+              source={{ uri: headerImage }}
+              style={{ width: 200, height: 200, borderRadius: 12 }}
             />
+          </Surface>
+        )}
+        <Text variant="headlineMedium" style={styles.title}>
+          {item.Name}
+        </Text>
 
-            <ActionSheet visible={isAddToPlaylistVisible} onClose={() => !isAddingToPlaylist && setIsAddToPlaylistVisible(false)} title="Add to Playlist" scrollable>
-                <View style={{ gap: 4 }}>
-                    {isAddingToPlaylist ? (
-                        <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
-                            <ActivityIndicator size="large" color={theme.colors.primary} />
-                            <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>Adding to playlist...</Text>
-                        </View>
-                    ) : (
-                        playlists.map(playlist => (
-                            <List.Item
-                                key={playlist.Id}
-                                title={playlist.Name}
-                                left={props => <List.Icon {...props} icon="playlist-music" />}
-                                onPress={() => handleAddToPlaylist(playlist.Id)}
-                            />
-                        ))
-                    )}
-                </View>
-            </ActionSheet>
+        {!!item.Overview && (
+          <Text
+            variant="bodyMedium"
+            numberOfLines={3}
+            style={{
+              color: theme.colors.onSurfaceVariant,
+              marginTop: 8,
+              textAlign: "center",
+              paddingHorizontal: 20,
+            }}
+          >
+            {item.Overview}
+          </Text>
+        )}
 
-            <ActionSheet visible={isDuplicateDialogVisible} onClose={() => setIsDuplicateDialogVisible(false)} title="Duplicate Song" heightPercentage={30}>
-                <View style={{ gap: 16 }}>
-                    <Text variant="bodyMedium">This song is already in the playlist. Do you want to add it anyway?</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setIsDuplicateDialogVisible(false)}>Cancel</Button>
-                        <Button mode="contained" onPress={() => {
-                            if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
-                        }}>Add Anyway</Button>
-                    </View>
-                </View>
-            </ActionSheet>
-
-            {/* Submenu Dialog for Playlist actions */}
-            <ActionSheet visible={isSubmenuVisible} onClose={() => setIsSubmenuVisible(false)} title="Track Options">
-                <View style={{ gap: 4 }}>
-                    <List.Item
-                        title="Play Next"
-                        description="Add to queue after current song"
-                        left={props => <List.Icon {...props} icon="playlist-play" />}
-                        onPress={handlePlayNext}
-                    />
-                    <List.Item
-                        title="Add to Queue"
-                        description="Add to end of queue"
-                        left={props => <List.Icon {...props} icon="playlist-plus" />}
-                        onPress={handleAddToQueue}
-                    />
-                    <List.Item
-                        title="Add to another playlist"
-                        left={props => <List.Icon {...props} icon="playlist-music" />}
-                        onPress={handleAddToAnotherPlaylist}
-                    />
-                    <List.Item
-                        title="Remove from this playlist"
-                        titleStyle={{ color: '#f44336' }}
-                        left={props => <List.Icon {...props} icon="playlist-remove" color="#f44336" />}
-                        onPress={handleRemoveFromPlaylist}
-                    />
-                </View>
-            </ActionSheet>
-
-            {/* Track Options Dialog (non-playlist views) */}
-            <ActionSheet visible={isTrackOptionsVisible} onClose={() => setIsTrackOptionsVisible(false)} title="Track Options">
-                <View style={{ gap: 4 }}>
-                    <List.Item
-                        title="Play Next"
-                        description="Add to queue after current song"
-                        left={props => <List.Icon {...props} icon="playlist-play" />}
-                        onPress={handlePlayNext}
-                    />
-                    <List.Item
-                        title="Add to Queue"
-                        description="Add to end of queue"
-                        left={props => <List.Icon {...props} icon="playlist-plus" />}
-                        onPress={handleAddToQueue}
-                    />
-                    <List.Item
-                        title="Add to Playlist"
-                        description="Save to a playlist"
-                        left={props => <List.Icon {...props} icon="playlist-music" />}
-                        onPress={handleOpenAddToPlaylistFromOptions}
-                    />
-                    {/* Delete Option for Local Tracks */}
-                    {dataSource === 'local' && (
-                        <List.Item
-                            title="Delete from device"
-                            titleStyle={{ color: '#f44336' }}
-                            left={props => <List.Icon {...props} icon="delete" color="#f44336" />}
-                            onPress={handleOpenDeleteConfirm}
-                        />
-                    )}
-                </View>
-            </ActionSheet>
-
-            {/* Remove Confirmation Dialog */}
-            <ActionSheet visible={isRemoveConfirmVisible} onClose={() => setIsRemoveConfirmVisible(false)} title="Remove from Playlist" heightPercentage={30}>
-                <View style={{ gap: 16 }}>
-                    <Text variant="bodyMedium">Are you sure you want to remove this song from the playlist?</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setIsRemoveConfirmVisible(false)}>Cancel</Button>
-                        <Button mode="contained" buttonColor="#f44336" onPress={confirmRemoveFromPlaylist}>Remove</Button>
-                    </View>
-                </View>
-            </ActionSheet>
-
-            {/* Delete Confirmation Dialog */}
-            <ActionSheet visible={isDeleteConfirmVisible} onClose={() => setIsDeleteConfirmVisible(false)} title="Delete from Device" heightPercentage={30}>
-                <View style={{ gap: 16 }}>
-                    <Text variant="bodyMedium">Are you sure you want to delete this file from your device? This action cannot be undone.</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setIsDeleteConfirmVisible(false)}>Cancel</Button>
-                        <Button mode="contained" buttonColor="#f44336" onPress={handleDeleteTrack}>Delete</Button>
-                    </View>
-                </View>
-            </ActionSheet>
-
-            {/* Download Confirmation Dialog */}
-            <ActionSheet visible={isDownloadConfirmVisible} onClose={() => setIsDownloadConfirmVisible(false)} title="Download All" heightPercentage={30}>
-                <View style={{ gap: 16 }}>
-                    <Text variant="bodyMedium">
-                        Download {tracks.length} {tracks.length === 1 ? 'song' : 'songs'} for offline listening?
-                    </Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button mode="text" onPress={() => setIsDownloadConfirmVisible(false)}>Cancel</Button>
-                        <Button mode="contained" onPress={handleDownloadAll}>Download</Button>
-                    </View>
-                </View>
-            </ActionSheet>
-
-            {/* Sort Options ActionSheet */}
-            <ActionSheet visible={isSortMenuVisible} onClose={() => setIsSortMenuVisible(false)} title="Sort Options">
-                <View style={{ gap: 4 }}>
-                    <List.Item
-                        title="Default"
-                        description="Original playlist order"
-                        left={props => <List.Icon {...props} icon="sort-variant" />}
-                        right={props => sortBy === 'default' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
-                        onPress={() => { setSortBy('default'); setIsSortMenuVisible(false); }}
-                    />
-                    <List.Item
-                        title="Name (A-Z)"
-                        description="Sort alphabetically by track name"
-                        left={props => <List.Icon {...props} icon="alphabetical" />}
-                        right={props => sortBy === 'name' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
-                        onPress={() => { setSortBy('name'); setIsSortMenuVisible(false); }}
-                    />
-                    <List.Item
-                        title="Artist"
-                        description="Sort by artist name"
-                        left={props => <List.Icon {...props} icon="account-music" />}
-                        right={props => sortBy === 'artist' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
-                        onPress={() => { setSortBy('artist'); setIsSortMenuVisible(false); }}
-                    />
-                    <List.Item
-                        title="Album"
-                        description="Group by album"
-                        left={props => <List.Icon {...props} icon="album" />}
-                        right={props => sortBy === 'album' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
-                        onPress={() => { setSortBy('album'); setIsSortMenuVisible(false); }}
-                    />
-                    <List.Item
-                        title="Duration"
-                        description="Sort by song length"
-                        left={props => <List.Icon {...props} icon="clock-outline" />}
-                        right={props => sortBy === 'duration' ? <List.Icon {...props} icon="check" color={theme.colors.primary} /> : null}
-                        onPress={() => { setSortBy('duration'); setIsSortMenuVisible(false); }}
-                    />
-                </View>
-            </ActionSheet>
-
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: 8,
+            marginTop: 12,
+          }}
+        >
+          <Surface
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 16,
+              backgroundColor: theme.colors.surfaceVariant,
+            }}
+          >
+            <Text
+              variant="labelMedium"
+              style={{ color: theme.colors.onSurfaceVariant }}
+            >
+              Playlist
+            </Text>
+          </Surface>
+          <Surface
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 16,
+              backgroundColor: theme.colors.surfaceVariant,
+            }}
+          >
+            <Text
+              variant="labelMedium"
+              style={{ color: theme.colors.onSurfaceVariant }}
+            >
+              {totalTrackCount || tracks.length} songs
+            </Text>
+          </Surface>
+          <Surface
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 16,
+              backgroundColor: theme.colors.surfaceVariant,
+            }}
+          >
+            <Text
+              variant="labelMedium"
+              style={{ color: theme.colors.onSurfaceVariant }}
+            >
+              {formatDuration(
+                tracks.reduce((acc, t) => acc + (t.RunTimeTicks || 0), 0),
+              )}
+            </Text>
+          </Surface>
         </View>
+
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginTop: 24,
+            paddingHorizontal: 20,
+            width: "100%",
+            justifyContent: "center",
+            gap: 12,
+          }}
+        >
+          <Button
+            mode="contained"
+            icon="play"
+            onPress={handlePlayAll}
+            style={[styles.playButton, { marginTop: 0 }]}
+            contentStyle={{ paddingHorizontal: 16 }}
+          >
+            Play
+          </Button>
+          <ShuffleFab size={48} onPress={handleShufflePlay} />
+          <IconButton
+            icon="sort-variant"
+            size={28}
+            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
+            onPress={() => setIsSortMenuVisible(true)}
+          />
+          {dataSource !== "local" && tracks.length > 0 ? (
+            <IconButton
+              icon="download"
+              size={28}
+              style={{
+                backgroundColor: theme.colors.surfaceVariant,
+                margin: 0,
+              }}
+              onPress={() => setIsDownloadConfirmVisible(true)}
+            />
+          ) : null}
+        </View>
+
+        <View
+          style={{
+            paddingHorizontal: 20,
+            marginTop: 24,
+            width: "100%",
+            marginBottom: 8,
+          }}
+        >
+          <TextInput
+            mode="outlined"
+            placeholder="Find in playlist"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            left={<TextInput.Icon icon="magnify" />}
+            style={{ backgroundColor: theme.colors.surface, height: 40 }}
+            dense
+          />
+        </View>
+      </View>
     );
+  };
+
+  const renderGenreHeader = () => {
+    return (
+      <View style={{ marginBottom: 24 }}>
+        <View style={[styles.header, { paddingTop: 20, marginBottom: 16 }]}>
+          <Surface
+            style={[
+              styles.artwork,
+              {
+                borderRadius: 12,
+                elevation: 4,
+                backgroundColor: theme.colors.surfaceVariant,
+              },
+            ]}
+            elevation={4}
+          >
+            <View
+              style={{
+                width: "100%",
+                height: "100%",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Avatar.Icon
+                size={80}
+                icon="music-box-outline"
+                color={theme.colors.onSurfaceVariant}
+                style={{ backgroundColor: "transparent" }}
+              />
+            </View>
+          </Surface>
+          <Text
+            variant="displaySmall"
+            style={[styles.title, { fontWeight: "900" }]}
+          >
+            {item.Name}
+          </Text>
+          <Text
+            variant="bodyMedium"
+            style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}
+          >
+            Genre • {tracks.length} Songs
+          </Text>
+
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginTop: 24,
+              width: "100%",
+              justifyContent: "center",
+              gap: 12,
+            }}
+          >
+            <Button
+              mode="contained"
+              icon="play"
+              onPress={handlePlayAll}
+              style={[styles.playButton, { marginTop: 0 }]}
+              contentStyle={{ paddingHorizontal: 16 }}
+            >
+              Play
+            </Button>
+            <ShuffleFab size={48} onPress={handleShufflePlay} />
+            <IconButton
+              icon="sort-variant"
+              size={28}
+              style={{
+                backgroundColor: theme.colors.surfaceVariant,
+                margin: 0,
+              }}
+              onPress={() => setIsSortMenuVisible(true)}
+            />
+            {dataSource !== "local" && tracks.length > 0 ? (
+              <IconButton
+                icon="download"
+                size={28}
+                style={{
+                  backgroundColor: theme.colors.surfaceVariant,
+                  margin: 0,
+                }}
+                onPress={() => setIsDownloadConfirmVisible(true)}
+              />
+            ) : null}
+          </View>
+        </View>
+
+        {similarArtists.length > 0 ? (
+          <View style={{ marginBottom: 24 }}>
+            <Text
+              variant="titleMedium"
+              style={{
+                paddingHorizontal: 20,
+                marginLeft: 20,
+                marginBottom: 12,
+                fontWeight: "bold",
+              }}
+            >
+              Artists in this Genre
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}
+            >
+              {similarArtists.map((artist) => (
+                <Pressable
+                  key={artist.Id}
+                  style={{ width: 100, alignItems: "center" }}
+                  onPress={() =>
+                    (navigation as any).push("Detail", {
+                      itemId: artist.Id,
+                      type: "MusicArtist",
+                    })
+                  }
+                >
+                  <Image
+                    source={{
+                      uri:
+                        artist.ImageUrl ||
+                        (dataSource === "jellyfin"
+                          ? jellyfinApi.getImageUrl(artist.Id)
+                          : undefined),
+                    }}
+                    style={{
+                      width: 100,
+                      height: 100,
+                      borderRadius: 50,
+                      marginBottom: 8,
+                      backgroundColor: theme.colors.surfaceVariant,
+                    }}
+                  />
+                  <Text
+                    variant="bodySmall"
+                    numberOfLines={2}
+                    style={{ textAlign: "center", fontWeight: "bold" }}
+                  >
+                    {artist.Name}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {artistAlbums.length > 0 ? (
+          <View style={{ marginBottom: 24 }}>
+            <Text
+              variant="titleMedium"
+              style={{
+                paddingHorizontal: 20,
+                marginLeft: 20,
+                marginBottom: 12,
+                fontWeight: "bold",
+              }}
+            >
+              Albums in this Genre
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}
+            >
+              {artistAlbums.map((album) => (
+                <Pressable
+                  key={album.Id}
+                  style={{ width: 140 }}
+                  onPress={() =>
+                    (navigation as any).navigate("Detail", {
+                      itemId: album.Id,
+                      type: "MusicAlbum",
+                    })
+                  }
+                >
+                  <Image
+                    source={{
+                      uri:
+                        album.ImageUrl ||
+                        (dataSource === "jellyfin"
+                          ? jellyfinApi.getImageUrl(album.Id)
+                          : undefined),
+                    }}
+                    style={{
+                      width: 140,
+                      height: 140,
+                      borderRadius: 8,
+                      marginBottom: 8,
+                      backgroundColor: theme.colors.surfaceVariant,
+                    }}
+                  />
+                  <Text
+                    variant="bodyMedium"
+                    numberOfLines={1}
+                    style={{ fontWeight: "bold" }}
+                  >
+                    {album.Name}
+                  </Text>
+                  <Text
+                    variant="bodySmall"
+                    numberOfLines={1}
+                    style={{ color: theme.colors.onSurfaceVariant }}
+                  >
+                    {album.ProductionYear || "Album"}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        <Text
+          variant="titleMedium"
+          style={{
+            paddingHorizontal: 20,
+            marginLeft: 20,
+            marginBottom: 8,
+            fontWeight: "bold",
+          }}
+        >
+          Songs
+        </Text>
+      </View>
+    );
+  };
+
+  const renderHeader = () => {
+    if (item.Type === "MusicArtist") {
+      return renderArtistHeader();
+    }
+    if (item.Type === "Playlist") {
+      return renderPlaylistHeader();
+    }
+    if (item.Type === "MusicGenre") {
+      return renderGenreHeader();
+    }
+    return (
+      <View style={styles.header}>
+        {!headerImage ? (
+          <Surface
+            style={[
+              styles.artwork,
+              {
+                borderRadius: 12,
+                elevation: 4,
+                backgroundColor: theme.colors.surfaceVariant,
+              },
+            ]}
+            elevation={4}
+          >
+            <View
+              style={{
+                width: "100%",
+                height: "100%",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Avatar.Icon
+                size={80}
+                icon={item.Id === "liked-songs" ? "heart" : "music"}
+                color={theme.colors.onSurfaceVariant}
+                style={{ backgroundColor: "transparent" }}
+              />
+            </View>
+          </Surface>
+        ) : (
+          <Surface style={styles.artwork} elevation={4}>
+            <Image
+              source={{ uri: headerImage }}
+              style={{ width: 200, height: 200, borderRadius: 12 }}
+            />
+          </Surface>
+        )}
+        <Text variant="headlineMedium" style={styles.title}>
+          {item.Name}
+        </Text>
+        <Text
+          variant="titleMedium"
+          style={{ color: theme.colors.onSurfaceVariant }}
+        >
+          {item.AlbumArtist || item.Artists?.[0] || type}
+        </Text>
+        <Text
+          variant="bodyMedium"
+          style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}
+        >
+          {item.Type === "MusicArtist"
+            ? "Artist"
+            : item.ProductionYear || "Playlist"}{" "}
+          • {tracks.length} songs •{" "}
+          {formatDuration(
+            tracks.reduce((acc, t) => acc + (t.RunTimeTicks || 0), 0),
+          )}
+        </Text>
+
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginTop: 24,
+            width: "100%",
+            justifyContent: "center",
+            gap: 12,
+          }}
+        >
+          <Button
+            mode="contained"
+            icon="play"
+            onPress={handlePlayAll}
+            style={[styles.playButton, { marginTop: 0 }]}
+            contentStyle={{ paddingHorizontal: 16 }}
+          >
+            Play
+          </Button>
+          <ShuffleFab size={48} onPress={handleShufflePlay} />
+          <IconButton
+            icon="sort-variant"
+            size={28}
+            style={{ backgroundColor: theme.colors.surfaceVariant, margin: 0 }}
+            onPress={() => setIsSortMenuVisible(true)}
+          />
+
+          {dataSource !== "local" && tracks.length > 0 ? (
+            <IconButton
+              icon="download"
+              size={28}
+              style={{
+                backgroundColor: theme.colors.surfaceVariant,
+                margin: 0,
+              }}
+              onPress={() => setIsDownloadConfirmVisible(true)}
+            />
+          ) : null}
+        </View>
+      </View>
+    );
+  };
+
+  const isArtist = item?.Type === "MusicArtist";
+
+  return (
+    <View
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+    >
+      {glowColor && (
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: -100,
+            left: -100,
+            right: -100,
+            height: 400,
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
+        >
+          <LinearGradient
+            colors={[`${glowColor}40`, "transparent"]}
+            style={{ flex: 1 }}
+          />
+        </Animated.View>
+      )}
+
+      <View
+        style={[
+          styles.appBar,
+          { paddingTop: insets.top },
+          isSelectionMode && {
+            backgroundColor: theme.colors.surface,
+            elevation: 4,
+          },
+          isArtist &&
+            !isSelectionMode && {
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              zIndex: 10,
+              backgroundColor: "transparent",
+            },
+        ]}
+      >
+        {isSelectionMode ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              flex: 1,
+              justifyContent: "space-between",
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <IconButton icon="close" onPress={exitSelectionMode} />
+              <Text variant="titleMedium" style={{ marginLeft: 8 }}>
+                {selectedTracks.size} selected
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row" }}>
+              <IconButton icon="download" onPress={handleDownloadSelected} />
+              <IconButton
+                icon="playlist-plus"
+                onPress={handleAddSelectedToPlaylist}
+              />
+              {dataSource === "local" && (
+                <IconButton icon="delete" onPress={handleDeleteSelected} />
+              )}
+            </View>
+          </View>
+        ) : (
+          <IconButton
+            icon="arrow-left"
+            onPress={() => navigation.goBack()}
+            style={{
+              backgroundColor: isArtist ? "rgba(0,0,0,0.3)" : "transparent",
+            }}
+            iconColor={isArtist ? "#fff" : undefined}
+          />
+        )}
+      </View>
+
+      <DraggableFlatList
+        data={filteredTracks}
+        extraData={[filteredTracks, isSelectionMode, selectedTracks]} // CRITICAL: Force re-render when selection state changes
+        renderItem={renderItem}
+        // Don't use index in keys unless absolutely necessary, as it destroys components on reorder
+        keyExtractor={(item, index) =>
+          item.queueItemId || item.PlaylistItemId || `${item.Id}-${index}`
+        }
+        ListHeaderComponent={renderHeader()}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 200 }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.primary}
+          />
+        }
+        getItemLayout={(data, index) => ({
+          length: 66,
+          offset: 66 * index,
+          index,
+        })}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={11}
+        removeClippedSubviews={true} // Free memory for offscreen items (CRITICAL for large playlists)
+        ListEmptyComponent={
+          tracksLoading ? (
+            <View style={{ paddingTop: 16 }}>
+              {Array.from({ length: 10 }).map((_, i) => (
+                <ListItemSkeleton key={i} />
+              ))}
+            </View>
+          ) : null
+        }
+        onDragEnd={({ data }) => {
+          setTracks(data); // Update UI
+          if (isDraggable && itemId) {
+            DatabaseService.updatePlaylistOrder(
+              itemId,
+              data.map((t) => t.Id),
+            ).catch(console.error);
+          }
+        }}
+        activationDistance={20}
+        onEndReached={loadMoreTracks}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          isFetchingMore ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.primary}
+              style={{ marginVertical: 16 }}
+            />
+          ) : null
+        }
+      />
+
+      <ActionSheet
+        visible={isAddToPlaylistVisible}
+        onClose={() => !isAddingToPlaylist && setIsAddToPlaylistVisible(false)}
+        title="Add to Playlist"
+        scrollable
+      >
+        <View style={{ gap: 4 }}>
+          {isAddingToPlaylist ? (
+            <View
+              style={{
+                padding: 40,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+              <Text style={{ marginTop: 16, color: theme.colors.onSurface }}>
+                Adding to playlist...
+              </Text>
+            </View>
+          ) : (
+            playlists.map((playlist) => (
+              <List.Item
+                key={playlist.Id}
+                title={playlist.Name}
+                left={(props) => <List.Icon {...props} icon="playlist-music" />}
+                onPress={() => handleAddToPlaylist(playlist.Id)}
+              />
+            ))
+          )}
+        </View>
+      </ActionSheet>
+
+      <ActionSheet
+        visible={isDuplicateDialogVisible}
+        onClose={() => setIsDuplicateDialogVisible(false)}
+        title="Duplicate Song"
+        heightPercentage={30}
+      >
+        <View style={{ gap: 16 }}>
+          <Text variant="bodyMedium">
+            This song is already in the playlist. Do you want to add it anyway?
+          </Text>
+          <View
+            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}
+          >
+            <Button
+              mode="text"
+              onPress={() => setIsDuplicateDialogVisible(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              mode="contained"
+              onPress={() => {
+                if (pendingPlaylistId) confirmAddToPlaylist(pendingPlaylistId);
+              }}
+            >
+              Add Anyway
+            </Button>
+          </View>
+        </View>
+      </ActionSheet>
+
+      {/* Submenu Dialog for Playlist actions */}
+      <ActionSheet
+        visible={isSubmenuVisible}
+        onClose={() => setIsSubmenuVisible(false)}
+        title="Track Options"
+      >
+        <View style={{ gap: 4 }}>
+          <List.Item
+            title="Play Next"
+            description="Add to queue after current song"
+            left={(props) => <List.Icon {...props} icon="playlist-play" />}
+            onPress={handlePlayNext}
+          />
+          <List.Item
+            title="Add to Queue"
+            description="Add to end of queue"
+            left={(props) => <List.Icon {...props} icon="playlist-plus" />}
+            onPress={handleAddToQueue}
+          />
+          <List.Item
+            title="Add to another playlist"
+            left={(props) => <List.Icon {...props} icon="playlist-music" />}
+            onPress={handleAddToAnotherPlaylist}
+          />
+          <List.Item
+            title="Remove from this playlist"
+            titleStyle={{ color: "#f44336" }}
+            left={(props) => (
+              <List.Icon {...props} icon="playlist-remove" color="#f44336" />
+            )}
+            onPress={handleRemoveFromPlaylist}
+          />
+        </View>
+      </ActionSheet>
+
+      {/* Track Options Dialog (non-playlist views) */}
+      <ActionSheet
+        visible={isTrackOptionsVisible}
+        onClose={() => setIsTrackOptionsVisible(false)}
+        title="Track Options"
+      >
+        <View style={{ gap: 4 }}>
+          <List.Item
+            title="Play Next"
+            description="Add to queue after current song"
+            left={(props) => <List.Icon {...props} icon="playlist-play" />}
+            onPress={handlePlayNext}
+          />
+          <List.Item
+            title="Add to Queue"
+            description="Add to end of queue"
+            left={(props) => <List.Icon {...props} icon="playlist-plus" />}
+            onPress={handleAddToQueue}
+          />
+          <List.Item
+            title="Add to Playlist"
+            description="Save to a playlist"
+            left={(props) => <List.Icon {...props} icon="playlist-music" />}
+            onPress={handleOpenAddToPlaylistFromOptions}
+          />
+          {/* Delete Option for Local Tracks */}
+          {dataSource === "local" && (
+            <List.Item
+              title="Delete from device"
+              titleStyle={{ color: "#f44336" }}
+              left={(props) => (
+                <List.Icon {...props} icon="delete" color="#f44336" />
+              )}
+              onPress={handleOpenDeleteConfirm}
+            />
+          )}
+        </View>
+      </ActionSheet>
+
+      {/* Remove Confirmation Dialog */}
+      <ActionSheet
+        visible={isRemoveConfirmVisible}
+        onClose={() => setIsRemoveConfirmVisible(false)}
+        title="Remove from Playlist"
+        heightPercentage={30}
+      >
+        <View style={{ gap: 16 }}>
+          <Text variant="bodyMedium">
+            Are you sure you want to remove this song from the playlist?
+          </Text>
+          <View
+            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}
+          >
+            <Button
+              mode="text"
+              onPress={() => setIsRemoveConfirmVisible(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              mode="contained"
+              buttonColor="#f44336"
+              onPress={confirmRemoveFromPlaylist}
+            >
+              Remove
+            </Button>
+          </View>
+        </View>
+      </ActionSheet>
+
+      {/* Delete Confirmation Dialog */}
+      <ActionSheet
+        visible={isDeleteConfirmVisible}
+        onClose={() => setIsDeleteConfirmVisible(false)}
+        title="Delete from Device"
+        heightPercentage={30}
+      >
+        <View style={{ gap: 16 }}>
+          <Text variant="bodyMedium">
+            Are you sure you want to delete this file from your device? This
+            action cannot be undone.
+          </Text>
+          <View
+            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}
+          >
+            <Button
+              mode="text"
+              onPress={() => setIsDeleteConfirmVisible(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              mode="contained"
+              buttonColor="#f44336"
+              onPress={handleDeleteTrack}
+            >
+              Delete
+            </Button>
+          </View>
+        </View>
+      </ActionSheet>
+
+      {/* Download Confirmation Dialog */}
+      <ActionSheet
+        visible={isDownloadConfirmVisible}
+        onClose={() => setIsDownloadConfirmVisible(false)}
+        title="Download All"
+        heightPercentage={30}
+      >
+        <View style={{ gap: 16 }}>
+          <Text variant="bodyMedium">
+            Download {tracks.length} {tracks.length === 1 ? "song" : "songs"}{" "}
+            for offline listening?
+          </Text>
+          <View
+            style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}
+          >
+            <Button
+              mode="text"
+              onPress={() => setIsDownloadConfirmVisible(false)}
+            >
+              Cancel
+            </Button>
+            <Button mode="contained" onPress={handleDownloadAll}>
+              Download
+            </Button>
+          </View>
+        </View>
+      </ActionSheet>
+
+      {/* Sort Options ActionSheet */}
+      <ActionSheet
+        visible={isSortMenuVisible}
+        onClose={() => setIsSortMenuVisible(false)}
+        title="Sort Options"
+      >
+        <View style={{ gap: 4 }}>
+          <List.Item
+            title="Default"
+            description="Original playlist order"
+            left={(props) => <List.Icon {...props} icon="sort-variant" />}
+            right={(props) =>
+              sortBy === "default" ? (
+                <List.Icon
+                  {...props}
+                  icon="check"
+                  color={theme.colors.primary}
+                />
+              ) : null
+            }
+            onPress={() => {
+              setSortBy("default");
+              setIsSortMenuVisible(false);
+            }}
+          />
+          <List.Item
+            title="Name (A-Z)"
+            description="Sort alphabetically by track name"
+            left={(props) => <List.Icon {...props} icon="alphabetical" />}
+            right={(props) =>
+              sortBy === "name" ? (
+                <List.Icon
+                  {...props}
+                  icon="check"
+                  color={theme.colors.primary}
+                />
+              ) : null
+            }
+            onPress={() => {
+              setSortBy("name");
+              setIsSortMenuVisible(false);
+            }}
+          />
+          <List.Item
+            title="Artist"
+            description="Sort by artist name"
+            left={(props) => <List.Icon {...props} icon="account-music" />}
+            right={(props) =>
+              sortBy === "artist" ? (
+                <List.Icon
+                  {...props}
+                  icon="check"
+                  color={theme.colors.primary}
+                />
+              ) : null
+            }
+            onPress={() => {
+              setSortBy("artist");
+              setIsSortMenuVisible(false);
+            }}
+          />
+          <List.Item
+            title="Album"
+            description="Group by album"
+            left={(props) => <List.Icon {...props} icon="album" />}
+            right={(props) =>
+              sortBy === "album" ? (
+                <List.Icon
+                  {...props}
+                  icon="check"
+                  color={theme.colors.primary}
+                />
+              ) : null
+            }
+            onPress={() => {
+              setSortBy("album");
+              setIsSortMenuVisible(false);
+            }}
+          />
+          <List.Item
+            title="Duration"
+            description="Sort by song length"
+            left={(props) => <List.Icon {...props} icon="clock-outline" />}
+            right={(props) =>
+              sortBy === "duration" ? (
+                <List.Icon
+                  {...props}
+                  icon="check"
+                  color={theme.colors.primary}
+                />
+              ) : null
+            }
+            onPress={() => {
+              setSortBy("duration");
+              setIsSortMenuVisible(false);
+            }}
+          />
+        </View>
+      </ActionSheet>
+    </View>
+  );
 });
 
 export default DetailScreen;
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    appBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 8,
-    },
-    listContent: {
-        // base padding if any
-    },
-    header: {
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        marginBottom: 24,
-    },
-    artwork: {
-        width: 200,
-        height: 200,
-        borderRadius: 12,
-        marginBottom: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    title: {
-        fontWeight: 'bold',
-        textAlign: 'center',
-        marginBottom: 4,
-    },
-    playButton: {
-        marginTop: 24,
-        borderRadius: 20,
-    },
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  appBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+  },
+  listContent: {
+    // base padding if any
+  },
+  header: {
+    alignItems: "center",
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  artwork: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  playButton: {
+    marginTop: 24,
+    borderRadius: 20,
+  },
 });
-
