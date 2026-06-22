@@ -1,7 +1,7 @@
-const { withAndroidAppBuildGradle } = require("@expo/config-plugins");
+const { withAppBuildGradle } = require("@expo/config-plugins");
 
 module.exports = function withAndroidSplits(config) {
-  return withAndroidAppBuildGradle(config, (cfg) => {
+  return withAppBuildGradle(config, (cfg) => {
     const content = cfg.modResults.contents;
     const splitsBlock = `
     splits {
