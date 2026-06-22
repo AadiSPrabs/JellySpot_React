@@ -4,78 +4,81 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      profile:
+        description: 'EAS build profile'
+        required: true
+        default: preview-split
+        type: choice
+        options:
+          - preview
+          - preview-split
+          - production-apk
+      version-code:
+        description: 'Android versionCode (integer, must be higher than previous)'
+        required: false
+        type: number
 
 env:
-  JAVA_VERSION: "17"
-  NODE_VERSION: "20"
   NDK_VERSION: "26.1.10909125"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: 22
           cache: npm
 
-      - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+      - uses: expo/expo-github-action@v8
         with:
-          distribution: zulu
-          java-version: ${{ env.JAVA_VERSION }}
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK ${{ env.NDK_VERSION }}
+      - name: Install NDK
         run: echo "y" | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.NDK_VERSION }}" --sdk_root=${ANDROID_HOME}
 
-      - name: Cache Node Modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: npm-${{ hashFiles('package-lock.json') }}
-
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Expo Prebuild (Generate Android Project)
-        run: npx expo prebuild --platform android --no-install --clean
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
-      - name: Build Release APKs (Split by ABI)
+      - name: Set versionCode (manual builds only)
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          cd android
-          export JAVA_OPTS="-Xmx2g"
-          ./gradlew assembleRelease
+          if [ -n "${{ inputs.version-code }}" ]; then
+            node -e "const fs=require('fs');const a=require('./app.json');a.expo.android.versionCode=${{ inputs.version-code }};fs.writeFileSync('./app.json',JSON.stringify(a,null,2))"
+          fi
 
-      - name: List Built APKs
+      - name: Decode keystore
+        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
+      - name: Create credentials.json
+        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
         run: |
-          echo "=== APK outputs ==="
-          find android/app/build/outputs -name "*.apk" -type f | sort
-          echo ""
-          echo "=== File sizes ==="
-          find android/app/build/outputs -name "*.apk" -type f -exec ls -lh {} \;
+          echo '{
+            "android": {
+              "keystore": {
+                "keystorePath": "keystore.jks",
+                "keystorePassword": "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}",
+                "keyAlias": "${{ secrets.ANDROID_KEY_ALIAS }}",
+                "keyPassword": "${{ secrets.ANDROID_KEY_PASSWORD }}"
+              }
+            }
+          }' > credentials.json
 
-      - name: Upload Split APKs
+      - name: Build Android split APKs
+        run: eas build --local --platform android --profile ${{ inputs.profile || 'preview-split' }} --non-interactive
+
+      - name: List artifacts
+        run: ls -lh *.apk 2>/dev/null || echo "No APK files at root"
+
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: jellyspot-split-apks
-          path: android/app/build/outputs/apk/release/*.apk
+          name: jellyspot-apks
+          path: ./*.apk
           if-no-files-found: error
           compression-level: 0
