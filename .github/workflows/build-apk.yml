@@ -74,6 +74,10 @@ jobs:
 
       - name: Build Android split APKs
         run: eas build --local --platform android --profile ${{ inputs.profile || 'preview-split' }} --non-interactive
+        env:
+          ORG_GRADLE_PROJECT_org.gradle.jvmargs: "-Xmx6g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError"
+          ORG_GRADLE_PROJECT_org.gradle.workers.max: "1"
+          ORG_GRADLE_PROJECT_org.gradle.parallel: "false"
 
       - name: List artifacts
         run: ls -lh *.apk 2>/dev/null || echo "No APK files at root"
