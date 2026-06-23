@@ -20,7 +20,7 @@ on:
         type: number
 
 env:
-  NDK_VERSION: "26.1.10909125"
+  NDK_VERSION: "27.1.12297006"
 
 jobs:
   build:

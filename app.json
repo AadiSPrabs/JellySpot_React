@@ -59,7 +59,7 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "ndkVersion": "26.1.10909125",
+            "ndkVersion": "27.1.12297006",
             "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true
           }
