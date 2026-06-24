@@ -156,7 +156,7 @@ const SettingsScreen = React.memo(function SettingsScreen() {
 
                 <SettingsGroup title="About">
                     <SettingsItem
-                        title="Version 1.1.2"
+                        title="Version 1.1.3"
                         icon="information-outline"
                     />
                     <SettingsItem
