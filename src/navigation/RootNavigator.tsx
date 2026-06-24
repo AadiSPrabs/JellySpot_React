@@ -103,39 +103,10 @@ export default function RootNavigator() {
   // Show onboarding first if not completed
   if (!onboardingComplete) {
     return (
-        <NavigationContainer
-            theme={theme as any}
-            ref={navigationRef}
-        >
-            <StatusBar style="light" />
-            <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
-                <Stack.Navigator
-                    screenOptions={{
-                        headerShown: false,
-                        animation: 'slide_from_right',
-                        contentStyle: { backgroundColor: theme.colors.background }
-                    }}
-                >
-                    {canAccessMain ? (
-                        <>
-                            <Stack.Screen name="Main" component={MainShell} />
-                            <Stack.Screen
-                                name="Queue"
-                                component={QueueScreen}
-                                options={{
-                                    presentation: 'transparentModal',
-                                    animation: 'slide_from_right',
-                                    animationDuration: 200, // Quicker transition
-                                    contentStyle: { backgroundColor: theme.colors.background }
-                                }}
-                            />
-                        </>
-                    ) : (
-                        <Stack.Screen name="Auth" component={AuthNavigator} />
-                    )}
-                </Stack.Navigator>
-            </View>
-        </NavigationContainer>
+      <NavigationContainer theme={theme as any} ref={navigationRef}>
+        <StatusBar style="light" />
+        <OnboardingScreen />
+      </NavigationContainer>
     );
   }
 
