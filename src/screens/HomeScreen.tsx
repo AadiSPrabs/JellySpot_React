@@ -18,6 +18,7 @@ import { SourceSwitcher } from '../components/SourceSwitcher';
 import { SongItem } from '../components/SongItem';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
+import { useConnectivityStore } from '../store/connectivityStore';
 import { DatabaseService } from '../services/DatabaseService';
 import { downloadService } from '../services/DownloadService';
 import * as ImagePicker from 'expo-image-picker';
@@ -174,6 +175,7 @@ const HomeScreen = React.memo(function HomeScreen() {
     const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
     const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
     const theme = useTheme();
+    const isOnline = useConnectivityStore((s) => s.isOnline);
     const { playTrack, setQueue, currentTrack, isPlaying, addToQueueNext, addToQueueEnd, playbackError, clearPlaybackError } = usePlayerStore(useShallow(state => ({
         playTrack: state.playTrack,
         setQueue: state.setQueue,
@@ -951,7 +953,17 @@ const HomeScreen = React.memo(function HomeScreen() {
         return () => unsubscribe();
     }, [dataSource]);
 
-
+    // Auto-retry on network reconnection
+    const prevOnlineRef = useRef(isOnline);
+    useEffect(() => {
+        if (!prevOnlineRef.current && isOnline) {
+            setError(null);
+            const { clearPlaybackError } = usePlayerStore.getState();
+            clearPlaybackError();
+            fetchData();
+        }
+        prevOnlineRef.current = isOnline;
+    }, [isOnline]);
 
     const handleItemPress = (item: MediaItem) => {
         // For Audio items (songs), play the song instead of navigating to detail
@@ -1416,8 +1428,8 @@ const HomeScreen = React.memo(function HomeScreen() {
             ],
           }}
         >
-          {/* Playback Error Banner */}
-          {!!playbackError && dataSource !== "local" && (
+          {/* Playback Error Banner — only shown when online (offline handled by OfflineIndicator) */}
+          {!!playbackError && dataSource !== "local" && isOnline && (
             <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
               <Surface
                 style={{
@@ -1429,7 +1441,7 @@ const HomeScreen = React.memo(function HomeScreen() {
               >
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Icon
-                    name="wifi-off"
+                    name="alert-circle-outline"
                     size={24}
                     color={theme.colors.onErrorContainer}
                   />
@@ -1441,15 +1453,21 @@ const HomeScreen = React.memo(function HomeScreen() {
                         fontWeight: "bold",
                       }}
                     >
-                      Connection Lost
+                      Playback Error
                     </Text>
                     <Text
                       variant="bodySmall"
                       style={{ color: theme.colors.onErrorContainer }}
                     >
-                      Playback stopped. Check your internet.
+                      {playbackError}
                     </Text>
                   </View>
+                  <IconButton
+                    icon="close"
+                    size={20}
+                    iconColor={theme.colors.onErrorContainer}
+                    onPress={clearPlaybackError}
+                  />
                 </View>
               </Surface>
             </View>

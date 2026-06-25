@@ -74,6 +74,7 @@ class AudioService {
       await TrackPlayer.play();
     } catch (error) {
       console.error("[AudioService] Play failed:", error);
+      throw error;
     }
   }
 

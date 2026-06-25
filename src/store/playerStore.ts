@@ -667,20 +667,44 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     // BACKGROUND: All native player operations happen after UI is updated
     try {
-      const streamUrl = await getStreamUrl(track);
+      let streamUrl = await getStreamUrl(track);
       const artworkUrl =
         track.imageUrl && !track.imageUrl.startsWith("data:")
           ? track.imageUrl
           : undefined;
 
-      await audioService.play({
-        id: trackWithId.queueItemId || trackWithId.id,
-        url: streamUrl,
-        title: track.name,
-        artist: track.artist,
-        artwork: artworkUrl,
-        duration: Math.max((track.durationMillis || 0) / 1000, 1),
-      });
+      const effectiveQuality = await getEffectiveAudioQuality();
+
+      try {
+        await audioService.play({
+          id: trackWithId.queueItemId || trackWithId.id,
+          url: streamUrl,
+          title: track.name,
+          artist: track.artist,
+          artwork: artworkUrl,
+          duration: Math.max((track.durationMillis || 0) / 1000, 1),
+        });
+      } catch (firstAttemptError) {
+        if (effectiveQuality !== "lossless") {
+          console.warn(
+            "[PlayerStore] Transcode playback failed, retrying with direct play:",
+            firstAttemptError,
+          );
+          const { serverUrl, user } = useAuthStore.getState();
+          streamUrl = `${serverUrl}/Audio/${track.id}/stream?api_key=${user?.token}&static=true`;
+
+          await audioService.play({
+            id: trackWithId.queueItemId || trackWithId.id,
+            url: streamUrl,
+            title: track.name,
+            artist: track.artist,
+            artwork: artworkUrl,
+            duration: Math.max((track.durationMillis || 0) / 1000, 1),
+          });
+        } else {
+          throw firstAttemptError;
+        }
+      }
 
       // Pre-fetch next track in background
       const { queue: currentQueue, repeatMode } = get();

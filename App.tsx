@@ -17,6 +17,7 @@ import { RemoteVolumeIndicator } from './src/components/RemoteVolumeIndicator';
 import { webSocketService } from './src/services/WebSocketService';
 import { setWebSocketService, setPlayerReset } from './src/store/authStore';
 import { initializeDatabase } from './src/db/init';
+import { useConnectivityStore } from './src/store/connectivityStore';
 
 function AppContent() {
   const { themeColor, isAmoledMode } = useUISettingsStore(
@@ -77,6 +78,9 @@ export default function App() {
 
     // Initialize player listeners
     usePlayerStore.getState().init();
+
+    // Initialize network connectivity listener
+    useConnectivityStore.getState().init();
   }, []);
 
   return (
