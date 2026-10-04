@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, StyleSheet, FlatList, Linking } from 'react-native';
-import { Text, List, IconButton, useTheme, Divider, TouchableRipple } from 'react-native-paper';
+import { View, StyleSheet, Linking } from 'react-native';
+import { Text, List, IconButton, useTheme, Divider } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import SettingsGroup from '../components/SettingsGroup';
@@ -70,7 +70,7 @@ const DependenciesScreen = React.memo(function DependenciesScreen() {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
             <View style={styles.appBar}>
-                <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
+                <IconButton icon="arrow-left" onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
                 <Text variant="titleLarge" style={{ fontWeight: 'bold' }}>Dependencies</Text>
             </View>
 

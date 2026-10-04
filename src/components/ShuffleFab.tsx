@@ -36,8 +36,11 @@ export const ShuffleFab = ({
             ]}
             onPress={onPress}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Shuffle play"
+            accessibilityHint="Starts playing this collection in a random order"
         >
-            <Icon name="shuffle" size={size * 0.5} color={iColor} />
+            <Icon name="shuffle" size={size * 0.5} color={iColor} accessibilityElementsHidden importantForAccessibility="no" />
         </TouchableOpacity>
     );
 };

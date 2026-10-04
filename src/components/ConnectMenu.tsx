@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native';
+import { useTheme } from 'react-native-paper';
 import { useRemoteStore, RemoteSession } from '../store/remoteStore';
 import { Monitor, Headphones, ChevronRight, Volume2, X, Check } from 'lucide-react-native';
 import Slider from '@react-native-community/slider';
@@ -9,6 +10,26 @@ import { RefreshCw } from 'lucide-react-native';
 
 export const ConnectMenu = ({ onClose }: { onClose: () => void }) => {
     const { activeSessions, targetSessionId, setTargetSessionId } = useRemoteStore();
+    const theme = useTheme();
+
+    /**
+     * Colours come from the app theme.
+     *
+     * This component previously carried a complete Spotify palette - `#1DB954`
+     * green, `#121212` background, `#282828` surfaces, `#333` borders. Those
+     * are another product's brand values, and they made this the one surface
+     * that visibly ignored Jellyspot's own theme.
+     */
+    const colors = {
+        accent: theme.colors.primary,
+        accentSoft: `${theme.colors.primary}1A`, // ~10% for the selected row
+        background: theme.colors.background,
+        surface: theme.colors.surfaceVariant,
+        border: theme.colors.outlineVariant,
+        text: theme.colors.onSurface,
+        textMuted: theme.colors.onSurfaceVariant,
+        danger: theme.colors.error,
+    };
 
     const sortedSessions = [...activeSessions].filter(s => s.SupportsRemoteControl);
 
@@ -42,43 +63,43 @@ export const ConnectMenu = ({ onClose }: { onClose: () => void }) => {
         const Icon = isDesktop ? Monitor : Headphones;
 
         return (
-            <View key={session.Id} style={styles.deviceItemContainer}>
+            <View key={session.Id} style={[styles.deviceItemContainer, { borderBottomColor: colors.border }]}>
                 <TouchableOpacity
                     style={[styles.deviceItem, isSelected && styles.selectedItem]}
                     onPress={() => handleSelectDevice(session.Id)}
                 >
-                    <View style={[styles.iconContainer, isSelected && styles.selectedIcon]}>
-                        <Icon size={24} color={isSelected ? '#1DB954' : '#fff'} />
+                    <View style={[styles.iconContainer, { backgroundColor: colors.surface }, isSelected && { backgroundColor: colors.accentSoft }]}>
+                        <Icon size={24} color={isSelected ? colors.accent : colors.text} />
                     </View>
                     <View style={styles.deviceInfo}>
-                        <Text style={[styles.deviceName, isSelected && styles.selectedText]}>
+                        <Text style={[styles.deviceName, { color: isSelected ? colors.accent : colors.text }]}>
                             {isSelected && 'Now Playing on '}
                             {session.DeviceName}
                         </Text>
-                        {isSelected && <Text style={styles.connectedText}>Connected</Text>}
+                        {isSelected && <Text style={[styles.connectedText, { color: colors.accent }]}>Connected</Text>}
                     </View>
 
                     {isSelected ? (
-                        <Check size={20} color="#1DB954" />
+                        <Check size={20} color={colors.accent} />
                     ) : (
                         <TouchableOpacity
                             onPress={() => setSigningOutId(signingOutId === session.Id ? null : session.Id)}
                             style={styles.arrowContainer}
                         >
-                            <ChevronRight size={20} color="#999" />
+                            <ChevronRight size={20} color={colors.textMuted} />
                         </TouchableOpacity>
                     )}
                 </TouchableOpacity>
 
                 {!isSelected && signingOutId === session.Id && (
                     <TouchableOpacity
-                        style={styles.signOutButton}
+                        style={[styles.signOutButton, { backgroundColor: colors.surface }]}
                         onPress={() => {
                             handleSignOut(session.Id);
                             setSigningOutId(null);
                         }}
                     >
-                        <Text style={styles.signOutText}>Sign out from device</Text>
+                        <Text style={[styles.signOutText, { color: colors.danger }]}>Sign out from device</Text>
                     </TouchableOpacity>
                 )}
             </View>
@@ -86,16 +107,25 @@ export const ConnectMenu = ({ onClose }: { onClose: () => void }) => {
     };
 
     return (
-        <View style={styles.container}>
+        <View
+            style={[
+                styles.container,
+                { backgroundColor: colors.background, borderTopColor: colors.border },
+            ]}
+        >
             <View style={styles.header}>
                 <View style={styles.titleRow}>
-                    <Text style={styles.title}>Connect to a device</Text>
-                    <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
-                        <RefreshCw size={20} color="#999" />
+                    <Text style={[styles.title, { color: colors.text }]}>Connect to a device</Text>
+                    <TouchableOpacity
+                        onPress={handleRefresh}
+                        style={styles.refreshButton}
+                        accessibilityLabel="Refresh device list"
+                    >
+                        <RefreshCw size={20} color={colors.textMuted} />
                     </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={onClose}>
-                    <X size={24} color="#fff" />
+                <TouchableOpacity onPress={onClose} accessibilityLabel="Close">
+                    <X size={24} color={colors.text} />
                 </TouchableOpacity>
             </View>
 
@@ -112,9 +142,9 @@ export const ConnectMenu = ({ onClose }: { onClose: () => void }) => {
             </ScrollView>
 
             {targetSessionId && targetSessionId !== 'local' && (
-                <View style={styles.footer}>
+                <View style={[styles.footer, { borderTopColor: colors.border }]}>
                     <View style={styles.volumeContainer}>
-                        <Volume2 size={20} color="#fff" />
+                        <Volume2 size={20} color={colors.text} />
                         <Slider
                             style={styles.slider}
                             minimumValue={0}
@@ -124,9 +154,9 @@ export const ConnectMenu = ({ onClose }: { onClose: () => void }) => {
                                 useRemoteStore.getState().setVolumeLevel(val);
                                 webSocketService.sendCommand(targetSessionId, 'SetVolume', { Volume: val });
                             }}
-                            minimumTrackTintColor="#1DB954"
-                            maximumTrackTintColor="#333"
-                            thumbTintColor="#1DB954"
+                            minimumTrackTintColor={colors.accent}
+                            maximumTrackTintColor={colors.border}
+                            thumbTintColor={colors.accent}
                         />
                     </View>
                 </View>
@@ -137,7 +167,7 @@ export const ConnectMenu = ({ onClose }: { onClose: () => void }) => {
 
 const styles = StyleSheet.create({
     container: {
-        backgroundColor: '#121212',
+        // Background and top border are supplied inline from the theme.
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         padding: 20,
@@ -150,7 +180,7 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     title: {
-        color: '#fff',
+        // Colour is supplied inline from the theme.
         fontSize: 20,
         fontWeight: 'bold',
     },
@@ -167,7 +197,7 @@ const styles = StyleSheet.create({
     },
     deviceItemContainer: {
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#333',
+        // Border colour is supplied inline from the theme.
     },
     deviceItem: {
         flexDirection: 'row',
@@ -181,14 +211,14 @@ const styles = StyleSheet.create({
         padding: 5,
     },
     signOutButton: {
-        backgroundColor: '#282828',
+        // Background is supplied inline from the theme.
         padding: 12,
         borderRadius: 8,
         marginBottom: 10,
         alignItems: 'center',
     },
     signOutText: {
-        color: '#ff4444',
+        // Colour is supplied inline from the theme.
         fontSize: 14,
         fontWeight: '500',
     },
@@ -196,27 +226,21 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#282828',
+        // Background is supplied inline from the theme.
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 15,
-    },
-    selectedIcon: {
-        backgroundColor: 'rgba(29, 185, 84, 0.1)',
     },
     deviceInfo: {
         flex: 1,
     },
     deviceName: {
-        color: '#fff',
+        // Colour is supplied inline from the theme.
         fontSize: 16,
         fontWeight: '500',
     },
-    selectedText: {
-        color: '#1DB954',
-    },
     connectedText: {
-        color: '#1DB954',
+        // Colour is supplied inline from the theme.
         fontSize: 12,
         marginTop: 2,
     },
@@ -224,7 +248,7 @@ const styles = StyleSheet.create({
         marginTop: 10,
         paddingTop: 10,
         borderTopWidth: 1,
-        borderTopColor: '#333',
+        // Border colour is supplied inline from the theme.
     },
     volumeContainer: {
         flexDirection: 'row',

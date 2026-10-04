@@ -110,44 +110,6 @@ export function darkenColor(
   };
 }
 
-/**
- * Get player colors based on dominant color from blurhash
- * Returns an object with all the colors needed for the player UI
- */
-export function getPlayerColorsFromBlurHash(
-  blurHash: string | null | undefined,
-): {
-  backgroundColor: string;
-  gradientColors: [string, string];
-  textColor: string;
-  secondaryTextColor: string;
-  iconColor: string;
-  activeColor: string;
-} | null {
-  if (!blurHash) return null;
-
-  const dominantColor = getDominantColorFromBlurHash(blurHash);
-  if (!dominantColor) return null;
-
-  const { r, g, b } = dominantColor;
-  const isLight = isLightColor(r, g, b);
-
-  // Create a slightly darkened version for gradient
-  const darkened = darkenColor(r, g, b, 0.4);
-
-  return {
-    backgroundColor: rgbToHex(r, g, b),
-    gradientColors: [
-      rgbToHex(r, g, b),
-      rgbToHex(darkened.r, darkened.g, darkened.b),
-    ],
-    textColor: isLight ? "#000000" : "#FFFFFF",
-    secondaryTextColor: isLight ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.7)",
-    iconColor: isLight ? "#000000" : "#FFFFFF",
-    activeColor: isLight ? "#000000" : "#FFFFFF",
-  };
-}
-
 // ============================================
 // Hex-based utilities (from PlayerScreen)
 // ============================================

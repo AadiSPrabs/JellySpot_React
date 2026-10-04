@@ -3,25 +3,20 @@ import { View, StyleSheet, TouchableOpacity, Animated, Dimensions, useWindowDime
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import { usePlayerStore } from '../store/playerStore';
+import { RADIUS } from '../theme/radius';
 import { jellyfinApi } from '../api/jellyfin';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types/navigation';
 import { Surface, Text, useTheme } from 'react-native-paper';
 import MarqueeText from './MarqueeText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Play, Pause, Music, Headphones, Monitor } from 'lucide-react-native';
 import { LiquidMiniProgressBar } from './LiquidMiniProgressBar';
 import ImageColors from 'react-native-image-colors';
-import { lightenHexColor } from '../utils/colorUtils';
 import { LEFT_BAR_WIDTH } from '../navigation/MainNavigator';
 
 import { audioService } from '../services/AudioService';
 import { useRemoteStore } from '../store/remoteStore';
 import { ConnectMenu } from './ConnectMenu';
 import { Modal, Portal } from 'react-native-paper';
-
-const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 import { useShallow } from 'zustand/react/shallow';
 
@@ -42,7 +37,6 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
         queueLength: state.queue.length,
         repeatMode: state.repeatMode
     })));
-    const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
     const { width, height } = useWindowDimensions();
     const isLandscape = width > height;
@@ -259,20 +253,17 @@ export default function MiniPlayer({ isPlayerVisible, isGlobal }: MiniPlayerProp
     if (!isVisible || !trackToRender) return null;
 
     const handlePress = () => {
-        if (isGlobal) {
-            usePlayerStore.getState().setPlayerExpanded(true);
-            return;
-        }
-
-        // Slide down FAST
-        Animated.timing(translateY, {
-            toValue: 200,
-            duration: 150,
-            useNativeDriver: true,
-        }).start(() => {
-            // THEN navigate
-            navigation.navigate('Player');
-        });
+        /**
+         * Expand the player.
+         *
+         * The non-global branch previously slid the bar down and then called
+         * `navigation.navigate('Player')` - but there is no 'Player' route:
+         * PlayerScreen is mounted by GlobalPlayer as a global overlay, not
+         * registered in any navigator. So in that branch the bar animated
+         * away and nothing opened. Expanding is the correct action in both
+         * cases; the store flag is what drives the overlay.
+         */
+        usePlayerStore.getState().setPlayerExpanded(true);
     };
 
 
@@ -354,7 +345,7 @@ const styles = StyleSheet.create({
         left: 12,
         right: 12,
         height: 64,
-        borderRadius: 12,
+        borderRadius: RADIUS.md,
         overflow: 'hidden',
         // Elevation needs to be on this container
         elevation: 4,
@@ -375,7 +366,7 @@ const styles = StyleSheet.create({
     image: {
         width: 48,
         height: 48,
-        borderRadius: 8,
+        borderRadius: RADIUS.sm,
         margin: 8,
         backgroundColor: 'rgba(0,0,0,0.1)',
     },

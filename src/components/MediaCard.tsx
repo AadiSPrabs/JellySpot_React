@@ -1,12 +1,12 @@
 import React from 'react';
 import { StyleSheet, StyleProp, ViewStyle } from 'react-native';
 import { Card, Text, useTheme } from 'react-native-paper';
-import { MediaItem } from '../types/media';
+import { MediaItem } from '../types/track';
 import ImageWithFallback from './ImageWithFallback';
 
 interface MediaCardProps {
     item: MediaItem;
-    imageUrl: string | null;
+    imageUrl: string | null | undefined;
     onPress: (item: MediaItem) => void;
     style?: StyleProp<ViewStyle>;
     imageStyle?: StyleProp<ViewStyle>;

@@ -86,13 +86,4 @@ export function useLandscapeDialogStyles() {
     };
 }
 
-// Get icon/text sizes for landscape
-export function getLandscapeSizes(isLandscape: boolean) {
-    return {
-        iconSize: isLandscape ? 20 : 24,
-        titleVariant: isLandscape ? 'titleMedium' : 'titleLarge',
-        bodyVariant: isLandscape ? 'bodySmall' : 'bodyMedium',
-        listTitleVariant: isLandscape ? 'bodyMedium' : 'bodyLarge',
-        listDescriptionVariant: isLandscape ? 'labelSmall' : 'bodySmall',
-    } as const;
-}
+

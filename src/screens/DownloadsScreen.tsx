@@ -7,6 +7,9 @@ import { useDownloadStore, Download, DownloadStatus } from '../store/downloadSto
 import { downloadService } from '../services/DownloadService';
 import { EmptyState } from '../components/EmptyState';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
 
 interface AlbumGroup {
     album: string;
@@ -16,6 +19,7 @@ interface AlbumGroup {
 
 const DownloadsScreen = React.memo(function DownloadsScreen() {
     const theme = useTheme();
+    const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const { downloads, loadDownloads, removeDownload, clearCompleted, retryDownload, cancelAllPending } = useDownloadStore();
     const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -103,8 +107,11 @@ const DownloadsScreen = React.memo(function DownloadsScreen() {
         switch (status) {
             case 'pending': return theme.colors.onSurfaceVariant;
             case 'downloading': return theme.colors.primary;
+            // Success has no MD3 role, so this stays a literal green; the
+            // failure case now uses the theme's error role rather than a
+            // hardcoded Material red.
             case 'completed': return '#4CAF50';
-            case 'failed': return '#f44336';
+            case 'failed': return theme.colors.error;
             case 'cancelled': return theme.colors.onSurfaceVariant;
             default: return theme.colors.onSurface;
         }
@@ -146,7 +153,7 @@ const DownloadsScreen = React.memo(function DownloadsScreen() {
                             </View>
                         )}
                         {item.status === 'failed' && !!item.errorMessage && (
-                            <Text variant="labelSmall" style={{ color: '#f44336' }} numberOfLines={1}>
+                            <Text variant="labelSmall" style={{ color: theme.colors.error }} numberOfLines={1}>
                                 {item.errorMessage}
                             </Text>
                         )}
@@ -241,7 +248,7 @@ const DownloadsScreen = React.memo(function DownloadsScreen() {
             </Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
                 {showCancelAll && count > 0 && (
-                    <Button mode="text" onPress={handleCancelAll} compact textColor="#f44336">
+                    <Button mode="text" onPress={handleCancelAll} compact textColor={theme.colors.error}>
                         Cancel All
                     </Button>
                 )}
@@ -269,6 +276,12 @@ const DownloadsScreen = React.memo(function DownloadsScreen() {
                     icon="download-off"
                     title="No downloads yet"
                     description="Download songs from your Jellyfin server to listen offline"
+                    /**
+                     * Give the empty state a way forward. Previously it only
+                     * stated the absence, leaving a new user with no next step.
+                     */
+                    actionLabel="Back to library"
+                    onAction={() => navigation.goBack()}
                 />
             ) : (
                 <FlatList

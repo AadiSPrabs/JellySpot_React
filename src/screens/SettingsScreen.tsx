@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, useWindowDimensions, Alert, Linking } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, Linking } from 'react-native';
 import { Text, List, Avatar, Button, useTheme, Divider, Surface, IconButton, Snackbar } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../store/authStore';
@@ -75,7 +75,7 @@ const SettingsScreen = React.memo(function SettingsScreen() {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
             <View style={[styles.appBar, isLandscape && styles.appBarLandscape]}>
-                <IconButton icon="arrow-left" onPress={() => navigation.goBack()} size={isLandscape ? 20 : 24} />
+                <IconButton icon="arrow-left" onPress={() => navigation.goBack()} size={isLandscape ? 20 : 24} accessibilityLabel="Go back" />
                 <Text variant={isLandscape ? "titleMedium" : "titleLarge"} style={{ fontWeight: 'bold' }}>Settings</Text>
             </View>
 

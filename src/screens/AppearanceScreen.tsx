@@ -61,6 +61,7 @@ const AppearanceScreen = React.memo(function AppearanceScreen() {
           icon="arrow-left"
           onPress={() => navigation.goBack()}
           size={isLandscape ? 20 : 24}
+          accessibilityLabel="Go back"
         />
         <Text
           variant={isLandscape ? "titleMedium" : "titleLarge"}
@@ -145,9 +146,6 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: 40,
   },
-  radioItem: {
-    paddingLeft: 8,
-  },
   colorGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -166,12 +164,5 @@ const styles = StyleSheet.create({
   },
   selectedSwatch: {
     borderColor: "#FFF",
-  },
-  dropdownContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
   },
 });

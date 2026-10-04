@@ -1,44 +1,50 @@
 import { create } from "zustand";
-import NetInfo, { NetInfoState } from "@react-native-community/netinfo";
+import * as Network from "expo-network";
+import type { EventSubscription } from "expo-modules-core";
 
 interface ConnectivityState {
   isOnline: boolean;
   isInternetReachable: boolean | null;
+  isWifi: boolean;
   init: () => () => void;
-  refresh: () => Promise<void>;
 }
 
+// `expo-network` ships as an Expo module, so it is always linked into the
+// native build (unlike @react-native-community/netinfo, which is an
+// old-architecture-only library and resolves to null under the New
+// Architecture).
 export const useConnectivityStore = create<ConnectivityState>(
-  (set, get) => ({
+  (set) => ({
     isOnline: true,
     isInternetReachable: null,
+    isWifi: false,
 
     init: () => {
-      const unsubscribe = NetInfo.addEventListener(
-        (state: NetInfoState) => {
-          set({
-            isOnline: !!state.isConnected,
-            isInternetReachable: state.isInternetReachable,
-          });
-        },
-      );
-
-      NetInfo.fetch().then((state) => {
+      const apply = (state: Network.NetworkState) => {
         set({
-          isOnline: !!state.isConnected,
-          isInternetReachable: state.isInternetReachable,
+          isOnline: state.isConnected ?? true,
+          isInternetReachable: state.isInternetReachable ?? null,
+          isWifi: state.type === Network.NetworkStateType.WIFI,
         });
-      });
+      };
 
-      return unsubscribe;
-    },
+      let subscription: EventSubscription | undefined;
 
-    refresh: async () => {
-      const state = await NetInfo.fetch();
-      set({
-        isOnline: !!state.isConnected,
-        isInternetReachable: state.isInternetReachable,
-      });
+      try {
+        subscription = Network.addNetworkStateListener(apply);
+      } catch {
+        // Listener unavailable - fall back to the initial fetch below.
+      }
+
+      Network.getNetworkStateAsync()
+        .then(apply)
+        .catch(() => {
+          // Leave the optimistic defaults in place.
+        });
+
+      return () => {
+        subscription?.remove();
+      };
     },
   }),
 );

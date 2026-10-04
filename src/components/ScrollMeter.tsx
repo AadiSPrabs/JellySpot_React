@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Dimensions, Text, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, Text, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 
@@ -10,10 +10,11 @@ interface ScrollMeterProps {
     msPerPixel?: number; // e.g., 10 for 10ms per pixel
 }
 
-const { width: screenWidth } = Dimensions.get('window');
-
 const ScrollMeter = ({ value, onValueChange, rangeMs = 10000, msPerPixel = 10 }: ScrollMeterProps) => {
     const theme = useTheme();
+    // Live width, used as the initial guess before onLayout reports the real
+    // container width. A module-scope value would be stale after rotation.
+    const { width: screenWidth } = useWindowDimensions();
     const scrollViewRef = useRef<ScrollView>(null);
     const [isInitialized, setIsInitialized] = useState(false);
     const [containerWidth, setContainerWidth] = useState(screenWidth);

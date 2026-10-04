@@ -1,10 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { View, StyleSheet, Animated, Dimensions, TouchableOpacity, PanResponder, StyleProp, ViewStyle, ScrollView, Platform, Keyboard, KeyboardEvent } from 'react-native';
+import { View, StyleSheet, Animated, TouchableOpacity, PanResponder, StyleProp, ViewStyle, ScrollView, Platform, Keyboard, KeyboardEvent, useWindowDimensions } from 'react-native';
 import { Text, useTheme, Portal } from 'react-native-paper';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface ActionSheetProps {
     visible: boolean;
@@ -29,6 +27,16 @@ export default function ActionSheet({
 }: ActionSheetProps) {
     const theme = useTheme();
     const insets = useSafeAreaInsets();
+    /**
+     * Live window height.
+     *
+     * This was captured once at module scope (`Dimensions.get('window')`) and
+     * used for the sheet's slide-in distance, its computed height and its
+     * dismiss gesture threshold. After a rotation the sheet would animate to
+     * the previous screen's height, so it could land off-screen and the swipe
+     * threshold would be wrong.
+     */
+    const { height: SCREEN_HEIGHT } = useWindowDimensions();
     const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
     const keyboardOffset = useRef(new Animated.Value(0)).current;
     const isClosingRef = useRef(false);

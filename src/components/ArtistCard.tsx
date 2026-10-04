@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, useTheme } from 'react-native-paper';
-import { MediaItem } from '../types/media';
+import { MediaItem } from '../types/track';
 import ImageWithFallback from './ImageWithFallback';
 
 interface ArtistCardProps {

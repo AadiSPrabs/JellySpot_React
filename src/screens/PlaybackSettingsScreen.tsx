@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useSettingsStore } from '../store/settingsStore';
 import { useUISettingsStore } from '../store/uiSettingsStore';
-import Slider from '@react-native-community/slider';
 import SettingsGroup from '../components/SettingsGroup';
 import SettingsItem from '../components/SettingsItem';
 
@@ -28,7 +27,7 @@ const PlaybackSettingsScreen = React.memo(function PlaybackSettingsScreen() {
       edges={["top"]}
     >
       <View style={styles.appBar}>
-        <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
+        <IconButton icon="arrow-left" onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
         <Text variant="titleLarge" style={{ fontWeight: "bold" }}>
           Playback
         </Text>

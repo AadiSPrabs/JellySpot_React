@@ -64,6 +64,7 @@ export default function ServerSelectScreen() {
                     icon="arrow-left"
                     size={24}
                     onPress={handleGoBack}
+                    accessibilityLabel="Go back"
                 />
             </View>
 

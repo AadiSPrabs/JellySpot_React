@@ -9,7 +9,6 @@ import { RootStackParamList } from "../types/navigation";
 import AuthNavigator from "./AuthNavigator";
 import MainNavigator from "./MainNavigator";
 import PlayerScreen from "../screens/PlayerScreen";
-import QueueScreen from "../screens/QueueScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import { useAuthStore } from "../store/authStore";
 import { usePlayerStore } from "../store/playerStore";
@@ -124,16 +123,6 @@ export default function RootNavigator() {
           {canAccessMain ? (
             <>
               <Stack.Screen name="Main" component={MainShell} />
-              <Stack.Screen
-                name="Queue"
-                component={QueueScreen}
-                options={{
-                  presentation: "transparentModal",
-                  animation: "slide_from_right",
-                  animationDuration: 200, // Quicker transition
-                  contentStyle: { backgroundColor: theme.colors.background },
-                }}
-              />
               {/* Common Settings Stack */}
               <Stack.Group
                 screenOptions={{

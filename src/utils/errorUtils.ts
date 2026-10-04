@@ -74,16 +74,4 @@ export function logError(
     console.warn(fullMessage);
 }
 
-/**
- * Log an error at 'error' severity (console.error).
- * Same API as logError but uses console.error for critical failures.
- */
-export function logCritical(
-    context: string,
-    error: unknown,
-    message?: string
-): void {
-    const prefix = message ? `${message}: ` : '';
-    const fullMessage = `[${context}] ${prefix}${getErrorMessage(error)}`;
-    console.error(fullMessage);
-}
+

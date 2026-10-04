@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Dimensions, RefreshControl } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions, RefreshControl } from 'react-native';
 import { Text, useTheme, Surface, IconButton, Divider } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
@@ -9,8 +9,6 @@ import { BarChart } from 'react-native-gifted-charts';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -28,6 +26,12 @@ function formatDuration(totalMinutes: number): { value: string; unit: string } {
 
 const StatsScreen = React.memo(function StatsScreen() {
     const theme = useTheme();
+    /**
+     * Live window width for chart sizing. Captured once at module scope this
+     * was fixed at app launch, so charts kept their portrait widths after a
+     * rotation and could overflow their container.
+     */
+    const { width: SCREEN_WIDTH } = useWindowDimensions();
     const { dataSource } = useSettingsStore();
     const navigation = useNavigation();
     const [refreshing, setRefreshing] = useState(false);
@@ -86,8 +90,9 @@ const StatsScreen = React.memo(function StatsScreen() {
             value,
             label,
             frontColor: i === 6 ? theme.colors.primary : `${theme.colors.primary}88`,
+            // 11px floor: 9px was below the readable minimum on a phone.
             topLabelComponent: value > 0 ? () => (
-                <Text style={{ color: theme.colors.primary, fontSize: 9, marginBottom: 2 }}>{value}</Text>
+                <Text style={{ color: theme.colors.primary, fontSize: 11, marginBottom: 2 }}>{value}</Text>
             ) : undefined,
         };
     });
@@ -117,7 +122,7 @@ const StatsScreen = React.memo(function StatsScreen() {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
             <View style={styles.header}>
-                <IconButton icon="arrow-left" size={24} onPress={() => navigation.goBack()} />
+                <IconButton icon="arrow-left" size={24} onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
                 <Text variant="headlineSmall" style={styles.headerTitle}>Listening Tracker</Text>
                 <View style={{ width: 48 }} />
             </View>
@@ -192,8 +197,8 @@ const StatsScreen = React.memo(function StatsScreen() {
                         barBorderRadius={6}
                         yAxisThickness={0}
                         xAxisThickness={0}
-                        xAxisLabelTextStyle={{ color: theme.colors.secondary, fontSize: 10 }}
-                        yAxisTextStyle={{ color: theme.colors.secondary, fontSize: 10 }}
+                        xAxisLabelTextStyle={{ color: theme.colors.secondary, fontSize: 11 }}
+                        yAxisTextStyle={{ color: theme.colors.secondary, fontSize: 11 }}
                         hideRules
                         isAnimated
                         animationDuration={600}

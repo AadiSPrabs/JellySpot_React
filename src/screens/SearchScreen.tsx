@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, ScrollView, Dimensions, Keyboard, SectionList, useWindowDimensions, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, ScrollView, Dimensions, Keyboard, SectionList, useWindowDimensions, Animated } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, TouchableRipple, Surface, Chip, ActivityIndicator } from 'react-native-paper';
@@ -8,7 +8,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLocalLibraryStore } from '../store/localLibraryStore';
 import { DatabaseService } from '../services/DatabaseService';
-import { Search as SearchIcon, X, ArrowLeft } from 'lucide-react-native';
+import { Search as SearchIcon, X } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SearchStackParamList } from '../types/navigation';
@@ -54,6 +54,13 @@ const SearchScreen = React.memo(function SearchScreen() {
     const [genresLoading, setGenresLoading] = useState(true);
     const [filter, setFilter] = useState<'All' | 'Songs' | 'Artists' | 'Albums'>('All');
     const [searchHistory, setSearchHistory] = useState<string[]>([]);
+    /**
+     * Set when the last search failed to reach a source, so the UI can tell
+     * "nothing matched" apart from "we couldn't ask". Without this, a network
+     * error fell through to the same "No results found" empty state and told
+     * the user their library was empty.
+     */
+    const [searchError, setSearchError] = useState<string | null>(null);
 
     const searchInputRef = useRef<TextInput>(null);
 
@@ -264,6 +271,7 @@ const SearchScreen = React.memo(function SearchScreen() {
 
     const performSearch = async () => {
         setLoading(true);
+        setSearchError(null);
         saveToHistory(query);
         try {
             // Clear previous results
@@ -275,21 +283,43 @@ const SearchScreen = React.memo(function SearchScreen() {
                 // Both sources - fetch in parallel
                 const [localData, jellyfinData] = await Promise.all([
                     Promise.resolve(searchLocal()),
-                    searchJellyfin().catch(() => []), // Don't fail if Jellyfin is down
+                    searchJellyfin().catch(() => null),
                 ]);
                 setLocalResults(localData);
-                setJellyfinResults(jellyfinData);
+                // A null here means the Jellyfin request failed rather than
+                // returning nothing. Local results still show, so this is a
+                // partial degradation rather than a hard error.
+                if (jellyfinData === null) {
+                    setSearchError(
+                        localData.length > 0
+                            ? 'Showing local results only - the Jellyfin server could not be reached.'
+                            : 'Could not reach the Jellyfin server. Check your connection and try again.',
+                    );
+                } else {
+                    setJellyfinResults(jellyfinData);
+                }
             } else if (useLocal) {
-                // Local only
-                const localData = await searchLocal();
-                setLocalResults(localData);
+                // Local only - a failure here is a real error worth surfacing.
+                try {
+                    const localData = await searchLocal();
+                    setLocalResults(localData);
+                } catch (localError) {
+                    console.error('Local search failed', localError);
+                    setSearchError('Could not search your local library. Please try again.');
+                }
             } else if (useJellyfin) {
                 // Jellyfin only
-                const data = await searchJellyfin();
-                setJellyfinResults(data);
+                try {
+                    const data = await searchJellyfin();
+                    setJellyfinResults(data);
+                } catch (jellyfinError) {
+                    console.error('Jellyfin search failed', jellyfinError);
+                    setSearchError('Could not reach the Jellyfin server. Check your connection and try again.');
+                }
             }
         } catch (error) {
             console.error('Search failed', error);
+            setSearchError('Search failed. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -387,7 +417,7 @@ const SearchScreen = React.memo(function SearchScreen() {
                         <Text style={styles.genreTitle}>{item.Name}</Text>
                         {item.isLocal && (
                             <View style={{ backgroundColor: 'rgba(0,0,0,0.3)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                <Text style={{ color: '#fff', fontSize: 10 }}>Local</Text>
+                                <Text style={{ color: '#fff', fontSize: 11 }}>Local</Text>
                             </View>
                         )}
                     </View>
@@ -524,6 +554,23 @@ const SearchScreen = React.memo(function SearchScreen() {
                         const showSectionHeaders = sections.length > 1 || (sections.length === 1 && sourceMode === 'both');
 
                         if (sections.length === 0) {
+                            /**
+                             * A failed request must not masquerade as an empty
+                             * library. When we know why nothing came back, say
+                             * so and offer a retry instead of implying the
+                             * query simply had no matches.
+                             */
+                            if (searchError) {
+                                return (
+                                    <EmptyState
+                                        icon="cloud-off-outline"
+                                        title="Search unavailable"
+                                        description={searchError}
+                                        actionLabel="Try again"
+                                        onAction={() => performSearch()}
+                                    />
+                                );
+                            }
                             return (
                                 <EmptyState
                                     icon="text-search"

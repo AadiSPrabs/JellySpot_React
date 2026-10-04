@@ -154,15 +154,20 @@ function CustomTabBar(
   );
 }
 
-function HomeStackNavigator() {
+function useStackScreenOptions() {
     const theme = useTheme();
+    return {
+        headerShown: false,
+        animation: 'slide_from_right',
+        animationDuration: 200,
+        contentStyle: { backgroundColor: theme.colors.background }
+    } as const;
+}
+
+function HomeStackNavigator() {
+    const screenOptions = useStackScreenOptions();
     return (
-        <HomeStack.Navigator screenOptions={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            animationDuration: 200,
-            contentStyle: { backgroundColor: theme.colors.background }
-        }}>
+        <HomeStack.Navigator screenOptions={screenOptions}>
             <HomeStack.Screen name="Home" component={HomeScreen} />
             <HomeStack.Screen name="Detail" component={DetailScreen} />
         </HomeStack.Navigator>
@@ -170,15 +175,9 @@ function HomeStackNavigator() {
 }
 
 function SearchStackNavigator() {
-    const theme = useTheme();
-    const { dataSource } = useSettingsStore();
+    const screenOptions = useStackScreenOptions();
     return (
-        <SearchStack.Navigator screenOptions={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            animationDuration: 200,
-            contentStyle: { backgroundColor: theme.colors.background }
-        }}>
+        <SearchStack.Navigator screenOptions={screenOptions}>
             <SearchStack.Screen name="Search" component={SearchScreen} />
             <SearchStack.Screen name="Detail" component={DetailScreen} />
             <SearchStack.Screen name="Dependencies" component={DependenciesScreen} />
@@ -187,15 +186,9 @@ function SearchStackNavigator() {
 }
 
 function LibraryStackNavigator() {
-    const theme = useTheme();
-    const { dataSource } = useSettingsStore();
+    const screenOptions = useStackScreenOptions();
     return (
-        <LibraryStack.Navigator screenOptions={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            animationDuration: 200,
-            contentStyle: { backgroundColor: theme.colors.background }
-        }}>
+        <LibraryStack.Navigator screenOptions={screenOptions}>
             <LibraryStack.Screen name="Library" component={LibraryScreen} />
             <LibraryStack.Screen name="Detail" component={DetailScreen} />
         </LibraryStack.Navigator>
@@ -365,7 +358,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   leftTabLabel: {
-    fontSize: 10,
+    fontSize: 11,
     marginTop: 4,
     textAlign: "center",
   },

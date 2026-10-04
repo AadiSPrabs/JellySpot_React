@@ -91,24 +91,4 @@ export const clearArtworkCache = async (): Promise<void> => {
     }
 };
 
-/**
- * Gets cache statistics
- */
-export const getCacheStats = async (): Promise<{ count: number; sizeBytes: number }> => {
-    try {
-        await ensureCacheDir();
-        const files = await FileSystem.readDirectoryAsync(ARTWORK_CACHE_DIR);
 
-        let totalSize = 0;
-        for (const file of files) {
-            const info = await FileSystem.getInfoAsync(`${ARTWORK_CACHE_DIR}${file}`);
-            if (info.exists && 'size' in info) {
-                totalSize += info.size || 0;
-            }
-        }
-
-        return { count: files.length, sizeBytes: totalSize };
-    } catch {
-        return { count: 0, sizeBytes: 0 };
-    }
-};

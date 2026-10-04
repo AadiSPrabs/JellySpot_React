@@ -143,6 +143,7 @@ const DownloadSettingsScreen = React.memo(function DownloadSettingsScreen() {
             icon="arrow-left"
             onPress={() => navigation.goBack()}
             size={isLandscape ? 20 : 24}
+            accessibilityLabel="Go back"
           />
           <Text
             variant={isLandscape ? "titleMedium" : "titleLarge"}

@@ -329,7 +329,7 @@ const SourceModeSettingsScreen = React.memo(
         edges={["top"]}
       >
         <View style={[styles.appBar, { zIndex: 1 }]}>
-          <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
+          <IconButton icon="arrow-left" onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
           <Text variant="titleLarge" style={{ fontWeight: "bold" }}>
             Music Sources
           </Text>

@@ -1,9 +1,6 @@
 import { NavigatorScreenParams } from "@react-navigation/native";
 
-export type RootStackParamList = {
-    Auth: undefined;
-    Main: NavigatorScreenParams<MainTabParamList>;
-    Queue: undefined;
+type SettingsRoutes = {
     Settings: undefined;
     Stats: undefined;
     Appearance: undefined;
@@ -13,6 +10,11 @@ export type RootStackParamList = {
     DownloadSettings: undefined;
     Dependencies: undefined;
 };
+
+export type RootStackParamList = {
+    Auth: undefined;
+    Main: NavigatorScreenParams<MainTabParamList>;
+} & SettingsRoutes;
 
 export type AuthStackParamList = {
   ServerSelect: undefined;
@@ -29,15 +31,7 @@ export type MainTabParamList = {
 export type HomeStackParamList = {
   Home: undefined;
   Detail: { itemId: string; type: string };
-  Settings: undefined;
-  Stats: undefined;
-  Appearance: undefined;
-  PlaybackSettings: undefined;
-  StorageSettings: undefined;
-  SourceModeSettings: undefined;
-  DownloadSettings: undefined;
-  Dependencies: undefined;
-};
+} & SettingsRoutes;
 
 export type SearchStackParamList = {
   Search: undefined;
@@ -48,15 +42,7 @@ export type SearchStackParamList = {
 export type LibraryStackParamList = {
   Library: undefined;
   Detail: { itemId: string; type: string };
-  Settings: undefined;
-  Stats: undefined;
-  Appearance: undefined;
-  PlaybackSettings: undefined;
-  StorageSettings: undefined;
-  SourceModeSettings: undefined;
-  DownloadSettings: undefined;
-  Dependencies: undefined;
-};
+} & SettingsRoutes;
 
 export type DownloadsStackParamList = {
   Downloads: undefined;

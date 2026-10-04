@@ -191,7 +191,7 @@ const StorageSettingsScreen = React.memo(function StorageSettingsScreen() {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
             <View style={styles.appBar}>
-                <IconButton icon="arrow-left" onPress={() => navigation.goBack()} />
+                <IconButton icon="arrow-left" onPress={() => navigation.goBack()} accessibilityLabel="Go back" />
                 <Text variant="titleLarge" style={{ fontWeight: 'bold' }}>Storage Settings</Text>
             </View>
 
