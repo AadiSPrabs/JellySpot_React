@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logError, isNotFoundError, getErrorMessage } from '../utils/errorUtils';
+import { generateUuid } from '../utils/uuid';
 
 // Unique device ID (generated once, persisted forever)
 let cachedDeviceId: string | null = null;
@@ -16,11 +17,7 @@ const getDeviceId = async (): Promise<string> => {
             return stored;
         }
     } catch { }
-    // Generate a new UUID
-    const id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = (Math.random() * 16) | 0;
-        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-    });
+    const id = generateUuid();
     cachedDeviceId = id;
     try {
         await AsyncStorage.setItem('jellyspot-device-id', id);
@@ -74,7 +71,7 @@ const getApiClient = () => {
     // Add auth header on every request using the LATEST token from store
     apiClient.interceptors.request.use(async (config) => {
         const currentToken = useAuthStore.getState().user?.token || '';
-        config.headers['X-Emby-Authorization'] = await getAuthHeaderAsync(currentToken);
+        config.headers['Authorization'] = await getAuthHeaderAsync(currentToken);
         return config;
     });
 
@@ -102,7 +99,7 @@ export const jellyfinApi = {
             Pw: pw,
         }, {
             headers: {
-                'X-Emby-Authorization': authHeader,
+                'Authorization': authHeader,
             }
         });
         return response.data;
@@ -113,7 +110,7 @@ export const jellyfinApi = {
         const authHeader = await getAuthHeaderAsync(token);
         const response = await axios.get(`${serverUrl}/Users/${userId}`, {
             headers: {
-                'X-Emby-Authorization': authHeader
+                'Authorization': authHeader
             },
             timeout: 5000
         });
@@ -125,7 +122,7 @@ export const jellyfinApi = {
         const authHeader = await getAuthHeaderAsync(token);
         const response = await axios.get(`${serverUrl}/Users/Me`, {
             headers: {
-                'X-Emby-Authorization': authHeader
+                'Authorization': authHeader
             },
             timeout: 5000
         });
@@ -399,36 +396,37 @@ export const jellyfinApi = {
         const api = getApiClient();
         const { user } = useAuthStore.getState();
 
-        // Strategy 1: Try the dedicated Lyrics endpoint (Jellyfin 10.9+)
-        // This is the correct endpoint for synced lyrics
+        /**
+         * Jellyfin 12 lyrics API.
+         *
+         * Verified against a live 12.0.0 server's OpenAPI document, which
+         * exposes exactly:
+         *   GET    /Audio/{itemId}/Lyrics                       (item's lyrics)
+         *   POST   /Audio/{itemId}/Lyrics                       (upload)
+         *   DELETE /Audio/{itemId}/Lyrics                       (delete)
+         *   GET    /Audio/{itemId}/RemoteSearch/Lyrics          (search providers)
+         *   GET    /Audio/{itemId}/RemoteSearch/Lyrics/{id}     (download one)
+         *   GET    /Providers/Lyrics/{lyricId}
+         *
+         * The old code tried `/Items/{itemId}/Lyrics` as a second strategy.
+         * That route does not exist in 12 (or in 10.9+, where it was never a
+         * lyrics endpoint), so every call 404'd and the strategy was dead
+         * weight - it doubled the request count on the miss path for nothing.
+         */
         try {
             const response = await api.get(`/Audio/${itemId}/Lyrics`, { timeout: 5000 });
-            // The response should have a Lyrics array with Start (ticks) and Text
-            if (response.data && response.data.Lyrics && Array.isArray(response.data.Lyrics) && response.data.Lyrics.length > 0) {
-
+            // LyricDto: { Metadata, Lyrics: [{ Text, Start (ticks), Cues }] }
+            if (response.data && Array.isArray(response.data.Lyrics) && response.data.Lyrics.length > 0) {
                 return response.data;
             }
         } catch (e: unknown) {
-            // Ignore 404 (Not Found) - expected if no lyrics or older server
+            // A 404 is expected whenever the track simply has no lyrics.
             if (!isNotFoundError(e)) {
                 logError('Jellyfin', `/Audio Lyrics endpoint failed: ${getErrorMessage(e)}`);
             }
         }
 
-        // Strategy 2: Try /Items/{id}/Lyrics (alternative endpoint)
-        try {
-            const response = await api.get(`/Items/${itemId}/Lyrics`, { timeout: 5000 });
-            if (response.data && response.data.Lyrics && Array.isArray(response.data.Lyrics) && response.data.Lyrics.length > 0) {
-
-                return response.data;
-            }
-        } catch (e: unknown) {
-            if (!isNotFoundError(e)) {
-                logError('Jellyfin', `/Items Lyrics endpoint failed: ${getErrorMessage(e)}`);
-            }
-        }
-
-        // Strategy 3: Fetch Item Details - check if HasLyrics is true, then check for embedded lyrics
+        // Item details, to distinguish "no lyrics" from "endpoint unavailable".
         try {
             const response = await api.get(`/Users/${user?.id}/Items/${itemId}`, {
                 params: {
@@ -437,19 +435,55 @@ export const jellyfinApi = {
                 timeout: 5000
             });
 
-            // If HasLyrics is true but we couldn't fetch them, the server may not support the endpoint
             if (response.data?.HasLyrics === false) {
-
                 return null;
             }
-
-            // No embedded lyrics in item details - return null
-
         } catch (e) {
             logError('Jellyfin', `Item details fetch failed: ${getErrorMessage(e)}`);
         }
 
         return null; // No lyrics found
+    },
+
+    /**
+     * Searches Jellyfin's own lyric providers for a track.
+     *
+     * New in Jellyfin 12 and previously unused by this app. It lets the server
+     * find lyrics the local library does not have, using whichever providers
+     * are configured server-side - which for a self-hosted setup is often a
+     * better hit rate than querying LRCLIB directly from the phone.
+     *
+     * Returns the provider's candidates; the caller picks one and downloads it
+     * with `downloadRemoteLyrics`.
+     */
+    searchRemoteLyrics: async (itemId: string) => {
+        const api = getApiClient();
+        try {
+            const response = await api.get(`/Audio/${itemId}/RemoteSearch/Lyrics`, { timeout: 15000 });
+            // RemoteLyricInfoDto[]: { Id, ProviderName, Lyrics }
+            return Array.isArray(response.data) ? response.data : [];
+        } catch (e: unknown) {
+            if (!isNotFoundError(e)) {
+                logError('Jellyfin', `Remote lyrics search failed: ${getErrorMessage(e)}`);
+            }
+            return [];
+        }
+    },
+
+    /**
+     * Downloads a specific remote lyric and attaches it to the item server-side.
+     * After this succeeds the track has lyrics, so a normal lyrics fetch will
+     * return them.
+     */
+    downloadRemoteLyrics: async (itemId: string, lyricId: string) => {
+        const api = getApiClient();
+        try {
+            await api.get(`/Audio/${itemId}/RemoteSearch/Lyrics/${lyricId}`, { timeout: 15000 });
+            return true;
+        } catch (e: unknown) {
+            logError('Jellyfin', `Remote lyrics download failed: ${getErrorMessage(e)}`);
+            return false;
+        }
     },
 
     // Quick Connect
@@ -513,7 +547,7 @@ export const jellyfinApi = {
 
         const authHeader = await getAuthHeaderAsync();
         const headers = {
-            'X-Emby-Authorization': authHeader
+            'Authorization': authHeader
         };
 
         const response = await axios.post(`${serverUrl}/QuickConnect/Initiate`, {}, { headers, timeout: 10000 });
@@ -526,7 +560,7 @@ export const jellyfinApi = {
 
         const authHeader = await getAuthHeaderAsync();
         const headers = {
-            'X-Emby-Authorization': authHeader
+            'Authorization': authHeader
         };
 
         // This endpoint returns 200 { Authenticated: true } if authorized
@@ -543,7 +577,7 @@ export const jellyfinApi = {
         const { serverUrl } = useAuthStore.getState();
         const authHeader = await getAuthHeaderAsync();
         const headers = {
-            'X-Emby-Authorization': authHeader
+            'Authorization': authHeader
         };
 
         // Exchange the validated secret for an access token
