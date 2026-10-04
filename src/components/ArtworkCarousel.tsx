@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -41,14 +41,29 @@ function ArtworkSlot({
 
     return (
         <View style={[StyleSheet.absoluteFill, { left: offsetPosition, width: '100%', height: size, alignItems: 'center', justifyContent: 'center' }]}>
-            <Surface style={{ elevation: 8, borderRadius, backgroundColor: 'transparent' }} elevation={5}>
+            <Surface style={{ borderRadius, backgroundColor: 'transparent' }} elevation={5}>
                 {track.imageUrl ? (
                     <ExpoImage
                         source={{ uri: track.imageUrl }}
                         style={{ width: size, height: size, borderRadius }}
                         contentFit="cover"
                         cachePolicy="memory-disk"
-                        recyclingKey={track.id}
+                        /**
+                         * `recyclingKey` is deliberately NOT set.
+                         *
+                         * It tells expo-image the view is being reused for a
+                         * different image, so it clears the current bitmap
+                         * before decoding the next one. That clear-then-load is
+                         * exactly the artwork disappearing and reappearing when
+                         * swiping between tracks.
+                         *
+                         * These three slots are not recycled: each is a stable
+                         * child at a fixed index, and the outgoing artwork is
+                         * already being animated off-screen by the carousel. So
+                         * there is nothing to protect against, and keeping the
+                         * previous frame visible until the next one decodes is
+                         * the behaviour we want.
+                         */
                         transition={0}
                     />
                 ) : (
@@ -70,7 +85,12 @@ export default function ArtworkCarousel({ size, borderRadius = 12 }: Props) {
         playPrevious: state.playPrevious,
     })));
 
-    const { width: SCREEN_WIDTH } = Dimensions.get('window');
+    /**
+     * Live window width. This drives the swipe distance and the off-screen
+     * offsets for the previous/next artwork slots, so a stale module-scope
+     * value would misalign the carousel after rotation.
+     */
+    const { width: SCREEN_WIDTH } = useWindowDimensions();
 
     // The "committed" track — the track whose artwork is centered at translateX=0
     const [committedTrack, setCommittedTrack] = useState<Track | null>(currentTrack);
@@ -112,23 +132,6 @@ export default function ArtworkCarousel({ size, borderRadius = 12 }: Props) {
             setCommittedTrack(currentTrack);
         }
     }, [currentTrack?.id]);
-
-    // Safety timeout for suppressSync
-    useEffect(() => {
-        if (suppressSyncRef.current) {
-            const timeout = setTimeout(() => {
-                if (suppressSyncRef.current) {
-                    suppressSyncRef.current = false;
-                    if (currentTrack && currentTrack.id !== committedTrackRef.current?.id) {
-                        translateX.value = 0;
-                        committedTrackRef.current = currentTrack;
-                        setCommittedTrack(currentTrack);
-                    }
-                }
-            }, 1000);
-            return () => clearTimeout(timeout);
-        }
-    }, [committedTrack?.id]);
 
     const { prevTrack, nextTrack } = useMemo(() => {
         if (!committedTrack || queue.length <= 1) return { prevTrack: null, nextTrack: null };

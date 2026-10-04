@@ -19,7 +19,7 @@
           "audio"
         ]
       },
-      "bundleIdentifier": "com.yourname.jellyspot"
+      "bundleIdentifier": "com.aadityaprabhu.jellyspot"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +29,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.yourname.jellyspot",
+      "package": "com.aadityaprabhu.jellyspot",
+      "versionCode": 3,
       "permissions": [
         "FOREGROUND_SERVICE",
         "WAKE_LOCK",
@@ -66,7 +67,8 @@
         }
       ],
       "expo-secure-store",
-      "./plugins/withAndroidSplits"
+      "./plugins/withAndroidSplits",
+      "./plugins/withNotificationIcon"
     ],
     "extra": {
       "eas": {

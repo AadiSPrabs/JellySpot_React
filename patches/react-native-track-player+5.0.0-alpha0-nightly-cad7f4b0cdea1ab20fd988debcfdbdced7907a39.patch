@@ -1,0 +1,29 @@
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/service/MusicService.kt
+index 60b6871..56e6cc2 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/service/MusicService.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/service/MusicService.kt
+@@ -10,6 +10,7 @@ import androidx.media3.session.MediaLibraryService
+ import androidx.media3.session.MediaSession
+ import androidx.media3.session.SessionCommand
+ import androidx.media3.session.SessionResult
++import androidx.media3.session.DefaultMediaNotificationProvider
+ import com.doublesymmetry.kotlinaudio.models.CustomCommandButton
+ import com.doublesymmetry.kotlinaudio.models.PlayerOptions
+ import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
+@@ -65,6 +66,16 @@ class MusicService : MediaLibraryService() {
+         }
+         mediaLibrarySession = MediaLibrarySession.Builder(this, player.exoPlayer, callback)
+         .setCustomLayout(customCommandButtons)
++            .setMediaNotificationProvider(
++                DefaultMediaNotificationProvider.Builder(this)
++                    // Android renders notification small icons as a white
++                    // silhouette. media3's default uses `android:icon`, i.e.
++                    // the COLOURED launcher icon, which Android flattens into a
++                    // solid white blob. ic_notification is the app's monochrome
++                    // mark, generated at every density.
++                    .setSmallIcon(com.aadityaprabhu.jellyspot.R.drawable.ic_notification)
++                    .build()
++            )
+             .build()
+     }
+ 

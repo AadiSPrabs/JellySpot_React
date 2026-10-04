@@ -53,6 +53,8 @@ interface PlayerState {
   toggleCurrentTrackFavorite: () => Promise<void>;
   isPlayerExpanded: boolean;
   setPlayerExpanded: (expanded: boolean) => void;
+  queueSource: string;
+  setQueueSource: (source: string) => void;
 }
 
 // Network state cache for battery optimization (30-second TTL)
@@ -202,6 +204,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   clearPlaybackError: () => set({ playbackError: null }),
   isPlayerExpanded: false,
   setPlayerExpanded: (expanded: boolean) => set({ isPlayerExpanded: expanded }),
+  queueSource: 'Queue',
+  setQueueSource: (source) => set({ queueSource: source }),
 
   // Initialize listeners
   init: async () => {
@@ -529,6 +533,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       // Setup audio service
       await audioService.setup();
 
+      /**
+       * Re-apply the restored repeat mode to the native player.
+       *
+       * `setup()` forces the native mode to Off (TrackPlayer defaults to ALL,
+       * which loops the native buffer independently of this store), so the
+       * user's persisted choice has to be pushed back afterwards or it would
+       * be silently reset on every launch.
+       */
+      audioService.setRepeatMode(get().repeatMode).catch(() => {});
+
       // Get native playback state for isPlaying status
       const playbackState = await TrackPlayer.getPlaybackState();
       set({
@@ -633,15 +647,39 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
 
+    const { queue } = get();
+
+    /**
+     * Resolve the queue identity for this track BEFORE generating a new one.
+     *
+     * This previously read `track.queueItemId || <new random id>`, which meant
+     * that calling `playTrack` with a track object that had been reconstructed
+     * elsewhere (the Jellyfin response, a native track from
+     * PlaybackActiveTrackChanged, an item from a playlist) minted a brand new
+     * queueItemId even though that song was already in the queue.
+     *
+     * The lookup below then failed to find it, took the "not in queue" branch,
+     * and replaced the entire queue with this single track - so the queue
+     * collapsed to one song and appeared to repeat itself endlessly.
+     *
+     * Reusing the existing entry's id keeps the queue intact. Only a track
+     * genuinely absent from the queue gets a fresh id.
+     */
+    const existingEntry = queue.find(
+      (t) =>
+        (track.queueItemId && t.queueItemId === track.queueItemId) ||
+        t.id === track.id,
+    );
+
     const trackWithId = {
       ...track,
       queueItemId:
         track.queueItemId ||
+        existingEntry?.queueItemId ||
         `${track.id}-${Math.random().toString(36).substring(2, 9)}`,
     };
 
     // INSTANT UI UPDATE: Update store BEFORE native calls so UI reflects immediately
-    const { queue } = get();
     let currentIndex = queue.findIndex(
       (t) =>
         (t.queueItemId || t.id) === (trackWithId.queueItemId || trackWithId.id),
@@ -1122,7 +1160,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const { repeatMode } = get();
     const modes: ("off" | "all" | "one")[] = ["off", "all", "one"];
     const nextIndex = (modes.indexOf(repeatMode) + 1) % modes.length;
-    set({ repeatMode: modes[nextIndex] });
+    const nextMode = modes[nextIndex];
+    set({ repeatMode: nextMode });
+    /**
+     * Mirror the choice onto the native player.
+     *
+     * Without this the native repeat mode stayed at TrackPlayer's default of
+     * ALL, so the native buffer looped on its own while the app also advanced
+     * its logical queue - songs repeated regardless of the setting.
+     */
+    audioService.setRepeatMode(nextMode).catch(() => {});
     persistQueueState();
   },
 

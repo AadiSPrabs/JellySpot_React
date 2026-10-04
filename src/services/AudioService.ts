@@ -21,6 +21,19 @@ class AudioService {
           android: {
             appKilledPlaybackBehavior:
               AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
+            /**
+             * NOTE: this TrackPlayer version (5.0.0-alpha) exposes no
+             * `smallIcon` option - the media3 notification provider resolves
+             * the icon from `android:icon` in the manifest, which is the
+             * COLOURED launcher icon. Android requires a white silhouette for
+             * notification small icons, so the launcher icon is flattened to a
+             * white blob.
+             *
+             * The drawable `ic_notification` (generated from the app's
+             * monochrome icon) is added under res/drawable-*dpi, but wiring it
+             * up needs a native override of the media3 notification provider -
+             * see MainApplication.
+             */
           },
           capabilities: [
             Capability.Play,
@@ -40,6 +53,17 @@ class AudioService {
           ],
           progressUpdateEventInterval: 1,
         });
+        /**
+         * Force the native repeat mode off at startup.
+         *
+         * TrackPlayer defaults to `RepeatMode.ALL`, which makes the native
+         * player loop its small buffer on its own. This app advances from its
+         * own logical queue via PlaybackQueueEnded, so leaving the native mode
+         * on ALL means two independent advance mechanisms race - the visible
+         * symptom being songs that repeat with repeat switched off. The store
+         * re-applies the user's real choice through setRepeatMode().
+         */
+        await TrackPlayer.setRepeatMode(RepeatMode.Off);
         this.isSetup = true;
       } catch (error) {
         this.isSetup = true;
@@ -123,14 +147,29 @@ class AudioService {
     await TrackPlayer.seekTo(positionMillis / 1000);
   }
 
-  async getPosition(): Promise<number> {
-    const position = await TrackPlayer.getProgress();
-    return position.position * 1000; // Convert to ms
-  }
-
-  async getDuration(): Promise<number> {
-    const position = await TrackPlayer.getProgress();
-    return position.duration * 1000; // Convert to ms
+  /**
+   * Mirrors the app's repeat mode onto the native player.
+   *
+   * TrackPlayer's native default is `RepeatMode.ALL` (see the library's
+   * PlayerOptions), and nothing in this app ever overrode it. So the native
+   * player looped its ~2-track buffer forever, independently of the app's own
+   * advance logic - which is why songs repeated even with repeat switched off.
+   * `off` must map to `RepeatMode.Off` for the native queue to stop at its end
+   * and let `PlaybackQueueEnded` drive the logical queue instead.
+   */
+  async setRepeatMode(mode: "off" | "all" | "one") {
+    if (!this.isSetup) return;
+    const native =
+      mode === "one"
+        ? RepeatMode.Track
+        : mode === "all"
+          ? RepeatMode.Queue
+          : RepeatMode.Off;
+    try {
+      await TrackPlayer.setRepeatMode(native);
+    } catch (error) {
+      console.warn("[AudioService] Failed to set repeat mode:", error);
+    }
   }
 
   async skipToNext() {
@@ -196,37 +235,6 @@ class AudioService {
     return await TrackPlayer.getVolume();
   }
 
-  // Remote Volume Helper
-  private remoteStoreDeps: {
-    setVolumeLevel?: (level: number) => void;
-    setShowVolumeIndicator?: (show: boolean) => void;
-    targetSessionId?: string | null;
-  } = {};
-
-  setRemoteStoreDependencies(deps: typeof this.remoteStoreDeps) {
-    this.remoteStoreDeps = { ...this.remoteStoreDeps, ...deps };
-  }
-
-  triggerRemoteVolumeIndicator(level: number) {
-    const targetSessionId = this.remoteStoreDeps.targetSessionId;
-
-    if (targetSessionId) {
-      if (this.remoteStoreDeps.setVolumeLevel)
-        this.remoteStoreDeps.setVolumeLevel(level);
-      if (this.remoteStoreDeps.setShowVolumeIndicator)
-        this.remoteStoreDeps.setShowVolumeIndicator(true);
-    } else {
-      // Fallback to require if not injected
-      try {
-        const { useRemoteStore } = require("../store/remoteStore");
-        const state = useRemoteStore.getState();
-        if (state.targetSessionId) {
-          state.setVolumeLevel(level);
-          state.setShowVolumeIndicator(true);
-        }
-      } catch (e) {}
-    }
-  }
 }
 
 export const audioService = new AudioService();
