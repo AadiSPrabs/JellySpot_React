@@ -118,7 +118,22 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
     const [isLoading, setIsLoading] = React.useState(true);
     const [selectedPlaylist, setSelectedPlaylist] = React.useState<any>(null);
     const [isDeleteVisible, setIsDeleteVisible] = React.useState(false);
-    const localLibrary = useLocalLibraryStore();
+    /**
+     * Distinguishes "the server didn't answer" from "there are no playlists".
+     * Without it a failed request rendered the same "No Playlists found" empty
+     * state as a genuinely empty library.
+     */
+    const [loadError, setLoadError] = React.useState<string | null>(null);
+    /**
+     * Selected narrowly: this screen reads `playlists` and calls two actions.
+     * Subscribing to the whole store also re-rendered it for every track scan
+     * and metadata-enrichment progress tick.
+     */
+    const localLibrary = useLocalLibraryStore(useShallow((s) => ({
+        playlists: s.playlists,
+        deletePlaylist: s.deletePlaylist,
+        createPlaylist: s.createPlaylist,
+    })));
 
     const CACHE_TTL = 5 * 60 * 1000;
     const getCache = (key: string) => {
@@ -141,6 +156,7 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
             const data = localLibrary.playlists.map(p => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackIds?.length || 0, isLocal: true }));
             setPlaylists(data);
             setCache(`playlists_${dataSource}`, data);
+            setLoadError(null);
         } else {
             try {
                 const data = await jellyfinApi.getPlaylists();
@@ -148,7 +164,11 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
                     setPlaylists(data.Items);
                     setCache(`playlists_${dataSource}`, data.Items);
                 }
-            } catch (error) { console.error(error); }
+                setLoadError(null);
+            } catch (error) {
+                console.error(error);
+                setLoadError('Could not load playlists. Check your connection and try again.');
+            }
         }
         setIsLoading(false);
     };
@@ -227,8 +247,11 @@ const PlaylistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSourc
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
-                ListEmptyComponent={<EmptyState icon="music-note-off" title="No Playlists found" description="Create a playlist to get started" />}
-                estimatedItemSize={64}
+                ListEmptyComponent={
+                    loadError
+                        ? <EmptyState icon="cloud-off-outline" title="Playlists unavailable" description={loadError} actionLabel="Try again" onAction={() => fetchPlaylists(true)} />
+                        : <EmptyState icon="music-note-off" title="No Playlists found" description="Create a playlist to get started" />
+                }
                 getItemType={getPlaylistItemType}
             />
             
@@ -251,6 +274,7 @@ const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource 
     const [artists, setArtists] = React.useState<any[]>([]);
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
+    const [loadError, setLoadError] = React.useState<string | null>(null);
 
     const CACHE_TTL = 5 * 60 * 1000;
     const getCache = (key: string) => {
@@ -280,7 +304,11 @@ const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource 
             }
             setArtists(data);
             setCache(`artists_${dataSource}`, data);
-        } catch (error) { console.error(error); }
+            setLoadError(null);
+        } catch (error) {
+            console.error(error);
+            setLoadError('Could not load artists. Check your connection and try again.');
+        }
         setIsLoading(false);
     };
 
@@ -311,8 +339,11 @@ const ArtistPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource 
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
-                ListEmptyComponent={<EmptyState icon="account-music" title="No Artists found" />}
-                estimatedItemSize={64}
+                ListEmptyComponent={
+                    loadError
+                        ? <EmptyState icon="cloud-off-outline" title="Artists unavailable" description={loadError} actionLabel="Try again" onAction={() => fetchArtists(true)} />
+                        : <EmptyState icon="account-music" title="No Artists found" description="Artists appear here once your library is scanned" />
+                }
                 getItemType={() => 'artist'}
             />
         </View>
@@ -323,6 +354,7 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource }
     const [albums, setAlbums] = React.useState<any[]>([]);
     const [isRefreshing, setIsRefreshing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
+    const [loadError, setLoadError] = React.useState<string | null>(null);
 
     const CACHE_TTL = 5 * 60 * 1000;
     const getCache = (key: string) => {
@@ -352,7 +384,11 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource }
             }
             setAlbums(data);
             setCache(`albums_${dataSource}`, data);
-        } catch (error) { console.error(error); }
+            setLoadError(null);
+        } catch (error) {
+            console.error(error);
+            setLoadError('Could not load albums. Check your connection and try again.');
+        }
         setIsLoading(false);
     };
 
@@ -383,8 +419,11 @@ const AlbumPage = React.memo(({ isLandscape, pageWidth, numColumns, dataSource }
                 numColumns={isLandscape ? numColumns : 1}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: 16 }]}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />}
-                ListEmptyComponent={<EmptyState icon="album" title="No Albums found" />}
-                estimatedItemSize={64}
+                ListEmptyComponent={
+                    loadError
+                        ? <EmptyState icon="cloud-off-outline" title="Albums unavailable" description={loadError} actionLabel="Try again" onAction={() => fetchAlbums(true)} />
+                        : <EmptyState icon="album" title="No Albums found" description="Albums appear here once your library is scanned" />
+                }
                 getItemType={() => 'album'}
             />
         </View>
@@ -407,7 +446,9 @@ const LibraryScreen = React.memo(function LibraryScreen() {
     const [refreshCounter, setRefreshCounter] = React.useState(0);
     const [isAddPlaylistVisible, setIsAddPlaylistVisible] = React.useState(false);
     const [newPlaylistName, setNewPlaylistName] = React.useState('');
-    const localLibrary = useLocalLibraryStore();
+    const localLibrary = useLocalLibraryStore(useShallow((s) => ({
+        createPlaylist: s.createPlaylist,
+    })));
 
     const handleCreatePlaylist = async () => {
         if (!newPlaylistName.trim()) return;

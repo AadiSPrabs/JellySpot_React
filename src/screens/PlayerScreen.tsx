@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, Dimensions, Image, Animated, PanResponder, LayoutAnimation, Platform, UIManager, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Pressable, Dimensions, Image, Animated, PanResponder, LayoutAnimation, Platform, UIManager, Alert, BackHandler } from 'react-native';
 import { Text, IconButton, useTheme, Surface, ActivityIndicator, Portal, List, Button, Snackbar } from 'react-native-paper';
 import { usePlayerStore } from '../store/playerStore';
 import { jellyfinApi } from '../api/jellyfin';
@@ -18,13 +18,18 @@ import { audioService } from '../services/AudioService';
 import { downloadService } from '../services/DownloadService';
 import { ScrollView } from 'react-native';
 import ActionSheet from '../components/ActionSheet';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Reanimated, { useSharedValue, useDerivedValue, useAnimatedStyle, withSpring, withTiming, interpolate, Extrapolation } from 'react-native-reanimated';
+import { SPRING, TIMING, EASE_OUT } from '../theme/motion';
+import { useAutoHide } from '../hooks/useAutoHide';
 import { EqualizerAnimation } from '../components/EqualizerAnimation';
 import LyricsView from '../components/LyricsView';
 import ArtworkCarousel from '../components/ArtworkCarousel';
 import MarqueeText from '../components/MarqueeText';
+import QueuePanel, { getPanelStops, COLLAPSED_HEIGHT } from '../components/QueuePanel';
 import GrainOverlay from '../components/GrainOverlay';
 import { ProgressControl } from '../components/ProgressControl';
+import { QueueMiniProgressBar } from '../components/QueueMiniProgressBar';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '../store/authStore';
@@ -61,9 +66,21 @@ interface PlayerScreenProps {
     isGlobal?: boolean;
 }
 
+/**
+ * Immersive-lyrics layout metrics.
+ *
+ * These describe how much the chrome occupies so the collapse animation can
+ * hand exactly that space to the lyrics. They are approximations of the
+ * transport block's rendered height (play surface 64 + bottom actions 44 +
+ * margins), which is stable because every control is a fixed size.
+ */
+const CHROME_HEIGHT = 212;
+/** How far the progress bar drops as the transport row collapses beneath it. */
+const PROGRESS_DROP = 124;
+
 const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreenProps = {}) {
     // Select specific fields to avoid re-rendering on positionMillis updates
-    const { currentTrack, isPlaying, isBuffering, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer } = usePlayerStore(useShallow(state => ({
+    const { currentTrack, isPlaying, isBuffering, togglePlayPause, playNext, playPrevious, toggleShuffle, toggleRepeat, shuffleMode, repeatMode, queueLength, playTrack, sleepTimerTarget, setSleepTimer, queue, reorderQueue, removeFromQueue, clearQueue, isPlayerExpanded, queueSource } = usePlayerStore(useShallow(state => ({
         currentTrack: state.currentTrack,
         isPlaying: state.isPlaying,
         isBuffering: state.isBuffering,
@@ -78,10 +95,35 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
         playTrack: state.playTrack,
         sleepTimerTarget: state.sleepTimerTarget,
         setSleepTimer: state.setSleepTimer,
+        queue: state.queue,
+        reorderQueue: state.reorderQueue,
+        removeFromQueue: state.removeFromQueue,
+        clearQueue: state.clearQueue,
+        isPlayerExpanded: state.isPlayerExpanded,
+        queueSource: state.queueSource,
     })));
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useTheme();
-    const localLibrary = useLocalLibraryStore();
+    /**
+     * Library access, selected narrowly.
+     *
+     * This previously called `useLocalLibraryStore()` with no selector, which
+     * subscribes to the whole store - including `tracks` (every scanned track)
+     * and scan progress. Any library mutation re-rendered the entire player,
+     * artwork carousel and queue panel with it.
+     *
+     * Actions are stable function references, so selecting them costs nothing.
+     * `playlists` is a much smaller array than `tracks` and is the only piece
+     * of state the player reads directly.
+     */
+    const localLibrary = useLocalLibraryStore(useShallow((s) => ({
+        playlists: s.playlists,
+        isFavorite: s.isFavorite,
+        toggleFavorite: s.toggleFavorite,
+        addToPlaylist: s.addToPlaylist,
+        removeFromPlaylist: s.removeFromPlaylist,
+        deleteTrack: s.deleteTrack,
+    })));
     const { backgroundType, themeColor, showTechnicalDetails } = useUISettingsStore(useShallow(s => ({
         backgroundType: s.backgroundType,
         themeColor: s.themeColor,
@@ -294,6 +336,15 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
 
     // (Old cross-fade removed — handled by FadeInGradient layer stacking)
 
+    /**
+     * Neutral colour for a control that is present but switched off.
+     *
+     * Deliberately not the accent and not the album-derived secondary text:
+     * tinting inactive toggles with the accent made "off" look "on", and the
+     * album-derived hue made them look like a different control set.
+     */
+    const inactiveControl = 'rgba(255,255,255,0.55)';
+
     const playerColors = useMemo(() => {
         if (dynamicColors) {
             return {
@@ -342,6 +393,148 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
     // Local state
     // isBuffering is now from the store selector above
     const [isLyricsVisible, setIsLyricsVisible] = useState(false);
+    const [isQueueOpen, setIsQueueOpen] = useState(false);
+
+    /**
+     * Immersive lyrics mode.
+     *
+     * While lyrics are showing, the header and transport controls fade out
+     * after a period of inactivity and the lyrics expand into the space. Any
+     * touch brings them back.
+     *
+     * Suspended whenever a dialog or the queue sheet is open, so the chrome can
+     * never hide underneath something the user is interacting with. Those
+     * dialog flags are declared further down, so this reads a ref that a later
+     * effect keeps in step - referencing them directly here would be a
+     * use-before-declaration error.
+     */
+    const [immersiveBlocked, setImmersiveBlocked] = useState(false);
+    const immersiveEnabled = isLyricsVisible && !isQueueOpen && !immersiveBlocked;
+
+    const { hidden: controlsHidden, poke: pokeControls } = useAutoHide({
+        delayMs: 4000,
+        enabled: immersiveEnabled,
+    });
+
+    /**
+     * 0 = controls fully visible, 1 = fully hidden.
+     *
+     * A single shared value drives every part of the transition (chrome fade,
+     * progress bar position, lyrics padding) so they cannot drift out of step -
+     * the same reasoning as the queue sheet's translateY.
+     */
+    const immersiveProgress = useSharedValue(0);
+    useEffect(() => {
+        immersiveProgress.value = withTiming(controlsHidden ? 1 : 0, {
+            duration: TIMING.SLOW,
+            easing: EASE_OUT,
+        });
+    }, [controlsHidden, immersiveProgress]);
+
+    /** Chrome (header, transport row, bottom actions) fades and collapses. */
+    const chromeStyle = useAnimatedStyle(() => ({
+        opacity: 1 - immersiveProgress.value,
+        // Collapse the height too, so the lyrics genuinely gain the space
+        // rather than sitting behind an invisible but still-present block.
+        maxHeight: interpolate(immersiveProgress.value, [0, 1], [CHROME_HEIGHT, 0]),
+        transform: [
+            { translateY: interpolate(immersiveProgress.value, [0, 1], [0, 12]) },
+        ],
+    }));
+
+    /** Progress bar drops toward the bottom edge as the controls go away. */
+    const progressBarStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateY: interpolate(immersiveProgress.value, [0, 1], [0, PROGRESS_DROP]) },
+        ],
+    }));
+
+    /**
+     * Heart and overflow leave sideways.
+     *
+     * They sit at opposite ends of the row, so a shared vertical fade reads as
+     * them simply blinking out. Sliding each toward its own edge matches where
+     * it lives, and the two travel in opposite directions from the one shared
+     * progress value so they stay in step with the rest of the chrome.
+     */
+    /**
+     * NOTE: the heart and track-overflow icons in the title row are NOT part
+     * of the immersive fade. The two icons the user sees above the progress
+     * bar in lyrics mode - `translate` on the left and `dots-horizontal` on
+     * the right - live inside LyricsView and are animated there, because they
+     * are absolutely positioned within it.
+     */
+
+    // Shared animated value for queue panel position. Reanimated shared value
+    // (not RN Animated) so the sheet runs entirely on the UI thread.
+    const insets = useSafeAreaInsets();
+    const panelStops = useMemo(
+        () => getPanelStops(height, insets.top, insets.bottom),
+        [height, insets.top, insets.bottom],
+    );
+    const queueTranslateY = useSharedValue(panelStops.collapsed);
+
+    // Keep the collapsed resting position correct across rotation/resize.
+    useEffect(() => {
+        if (!isQueueOpen) {
+            queueTranslateY.value = panelStops.collapsed;
+        }
+    }, [panelStops.collapsed, isQueueOpen, queueTranslateY]);
+
+    // Mini player overlay opacity: fades in as the queue transitions from peek to full
+    const miniPlayerOpacity = useDerivedValue(() =>
+        interpolate(
+            queueTranslateY.value,
+            [panelStops.full, panelStops.peek],
+            [1, 0],
+            Extrapolation.CLAMP,
+        ),
+    );
+
+    const miniPlayerAnimatedStyle = useAnimatedStyle(() => ({
+        opacity: miniPlayerOpacity.value,
+    }));
+
+    /**
+     * Stable identities for QueuePanel props.
+     *
+     * The panel is memoised, so an inline array or arrow here would create a new
+     * identity every render and defeat the memo entirely - re-rendering a
+     * virtualised list of up to hundreds of rows on every play/pause.
+     */
+    const panelGradientColors = useMemo<[string, string]>(
+        () => dynamicColors?.gradientColors || ['#1a1a1a', '#000000'],
+        [dynamicColors?.gradientColors],
+    );
+
+    const handleSaveQueueAsPlaylist = useCallback(async (name: string) => {
+        const trackIds = usePlayerStore.getState().queue.map((t: any) => t.id);
+        // Read from the store rather than the `dataSource` binding: this
+        // callback is declared above where that binding is created, and the
+        // value only matters at call time anyway.
+        const { dataSource: currentSource } = useSettingsStore.getState();
+        if (currentSource === 'local') {
+            const playlist = useLocalLibraryStore.getState().createPlaylist(name);
+            for (const id of trackIds) {
+                useLocalLibraryStore.getState().addToPlaylist(playlist.id, id);
+            }
+        } else {
+            await jellyfinApi.createPlaylist(name, trackIds);
+        }
+    }, []);
+
+    // Slightly darkened solid background for the mini player overlay
+    const miniPlayerBgColor = useMemo(() =>
+        adjustHexColor(dynamicColors?.backgroundColor || '#1a1a1a', -30),
+    [dynamicColors?.backgroundColor]);
+
+    // Reset queue panel when player expands
+    useEffect(() => {
+        if (isPlayerExpanded) {
+            setIsQueueOpen(false);
+        }
+    }, [isPlayerExpanded]);
+
     const [isSleepTimerVisible, setIsSleepTimerVisible] = useState(false);
     const [artworkError, setArtworkError] = useState(false);
     const [isSpeedDialogVisible, setIsSpeedDialogVisible] = useState(false);
@@ -366,6 +559,31 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
     const [isRemoveConfirmVisible, setIsRemoveConfirmVisible] = useState(false);
     const [isDeleteConfirmVisible, setIsDeleteConfirmVisible] = useState(false); // New state for delete confirmation
 
+    /**
+     * Keep the immersive-mode suspension flag in step with the dialogs.
+     *
+     * Declared here (after the flags) so it can read them without a
+     * use-before-declaration error, and so opening any dialog immediately
+     * restores the chrome rather than hiding it underneath.
+     */
+    useEffect(() => {
+        const blocked =
+            isSleepTimerVisible ||
+            isSpeedDialogVisible ||
+            isSubmenuVisible ||
+            isAddToPlaylistVisible ||
+            isRemoveConfirmVisible ||
+            isDeleteConfirmVisible;
+        setImmersiveBlocked(blocked);
+    }, [
+        isSleepTimerVisible,
+        isSpeedDialogVisible,
+        isSubmenuVisible,
+        isAddToPlaylistVisible,
+        isRemoveConfirmVisible,
+        isDeleteConfirmVisible,
+    ]);
+
     // Get current track context
     const isPlayingFromPlaylist = !!currentTrack?.playlistId && currentTrack.playlistId !== 'all-songs'; // Allow 'liked-songs', exclude 'all-songs'
     const currentPlaylistId = currentTrack?.playlistId;
@@ -381,6 +599,18 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
         audioService.setPlaybackRate(playbackRate);
     }, [playbackRate]);
 
+    useEffect(() => {
+        const onBack = () => {
+            if (isQueueOpen) {
+                setIsQueueOpen(false);
+                return true;
+            }
+            return false;
+        };
+        const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+        return () => sub.remove();
+    }, [isQueueOpen]);
+
     // Get updateTrackFavorite from store
     const updateTrackFavorite = usePlayerStore(state => state.updateTrackFavorite);
 
@@ -392,9 +622,23 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
         currentTrack?.streamUrl?.startsWith('content://') ||
         currentTrack?.id?.startsWith('local_');
 
+    /**
+     * Local favourite status for the *current* track only.
+     *
+     * `isFavorite` reads from the store's `tracks` array, so reading it through
+     * a non-reactive path would leave the heart stale after a toggle. Selecting
+     * just this one boolean keeps it reactive without subscribing the player to
+     * the whole track list.
+     */
+    const isLocalFavorite = useLocalLibraryStore((s) => {
+        if (!currentTrack?.id) return false;
+        const track = s.tracks.find((t) => t.id === currentTrack.id);
+        return track?.isFavorite || false;
+    });
+
     // Get favorite status - check local library for local tracks
     const isFavorite = isLocalTrack
-        ? localLibrary.isFavorite(currentTrack?.id || '')
+        ? isLocalFavorite
         : (currentTrack?.isFavorite ?? false);
 
     const handleLike = async () => {
@@ -697,15 +941,57 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
 
             {/* Content wrapped in SafeAreaView */}
             <SafeAreaView style={styles.content} edges={['top', 'bottom', 'left', 'right']}>
-                {/* Header - only show in portrait */}
+                {/*
+                  Any touch anywhere in the player restores the chrome in
+                  immersive lyrics mode and restarts the idle countdown.
+                  `box-none` means it only observes touches that land on empty
+                  space - controls underneath still receive their own taps.
+                */}
+                {immersiveEnabled && (
+                    <Pressable
+                        style={StyleSheet.absoluteFill}
+                        onPressIn={pokeControls}
+                        pointerEvents={controlsHidden ? 'auto' : 'box-none'}
+                        accessibilityLabel="Show playback controls"
+                    />
+                )}
+                {/*
+                  Header - portrait only.
+
+                  Carries the dismiss chevron, a centred title, and a spacer
+                  that keeps the title optically centred despite the chevron.
+                  The title reads "Lyrics" in lyrics mode because that is a real
+                  mode change, and "Now Playing" otherwise.
+                */}
                 {!isLandscape && (
-                    <View style={styles.header}>
-                        <View style={{ width: 48 }} /> {/* Replaced chevron with spacer for symmetry since swipe dismisses */}
-                        <Text variant="titleMedium" style={{ color: playerColors.textColor, fontWeight: 'bold' }}>
+                    <Reanimated.View style={[styles.header, chromeStyle]}>
+                        <IconButton
+                            icon="chevron-down"
+                            iconColor={playerColors.secondaryTextColor}
+                            size={26}
+                            onPress={handleClosePlayer}
+                            /**
+                             * Material's IconButton defaults to a 48dp box.
+                             * The box is pinned to the header height to keep
+                             * the row short, and `hitSlop` restores an
+                             * accessible touch target without inflating the
+                             * layout. The negative left margin aligns the
+                             * glyph with the content edge, not its padding.
+                             */
+                            style={{ margin: 0, marginLeft: -8, width: 36, height: 36 }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityLabel="Close player"
+                        />
+                        <Text
+                            variant="titleMedium"
+                            numberOfLines={1}
+                            style={{ color: playerColors.textColor, fontWeight: 'bold' }}
+                        >
                             {isLyricsVisible ? 'Lyrics' : 'Now Playing'}
                         </Text>
-                        <View style={{ width: 48 }} />
-                    </View>
+                        {/* Balances the chevron so the title stays centred. */}
+                        <View style={{ width: 36 }} />
+                    </Reanimated.View>
                 )}
 
 
@@ -720,6 +1006,7 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                     activeColor={playerColors.activeColor}
                                     inactiveColor={playerColors.secondaryTextColor}
                                     localLyrics={currentTrack.lyrics}
+                                        chromeHidden={controlsHidden}
                                 />
                             ) : (
                                 <View style={{ width: '100%', aspectRatio: 1, maxHeight: height * 0.85, alignItems: 'center', justifyContent: 'center' }}>
@@ -790,7 +1077,10 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                     icon="shuffle"
                                     iconColor={shuffleMode ? playerColors.activeColor : playerColors.secondaryTextColor}
                                     size={22}
-                                    onPress={toggleShuffle}
+                                    // onPress passes a GestureResponderEvent, but the
+                                    // handler takes an optional boolean, so wrap it
+                                    // rather than forwarding the event as that flag.
+                                    onPress={() => toggleShuffle()}
                                 />
                             </View>
 
@@ -828,15 +1118,6 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                     onPress={handleLike}
                                 />
                                 <IconButton
-                                    icon="playlist-music"
-                                    iconColor={playerColors.secondaryTextColor}
-                                    size={22}
-                                    onPress={() => {
-                                        navigation.navigate('Queue');
-                                        setIsLyricsVisible(false);
-                                    }}
-                                />
-                                <IconButton
                                     icon="dots-vertical"
                                     iconColor={playerColors.secondaryTextColor}
                                     size={22}
@@ -855,11 +1136,23 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                     activeColor={playerColors.activeColor}
                                     inactiveColor={playerColors.secondaryTextColor}
                                     localLyrics={currentTrack.lyrics}
+                                        chromeHidden={controlsHidden}
                                 />
                             ) : (
                                 <>
                                     <View style={styles.artworkContainer}>
-                                        <ArtworkCarousel size={width - 80} borderRadius={12} />
+                                        {/*
+                                          Clamp to the available height as well
+                                          as the width. `width - 80` alone made
+                                          the artwork taller than the space
+                                          left for it on short screens and in
+                                          split-screen, pushing the transport
+                                          controls off the bottom.
+                                        */}
+                                        <ArtworkCarousel
+                                            size={Math.min(width - 80, height * 0.45)}
+                                            borderRadius={8}
+                                        />
                                     </View>
 
                                     <View style={styles.trackInfo}>
@@ -904,28 +1197,28 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                                     <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                                                         {!!isAutoMode && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(100,200,100,0.2)' }}>
-                                                                <Text variant="labelSmall" style={{ color: playerColors.activeColor, fontSize: 10 }}>
+                                                                <Text variant="labelSmall" style={{ color: playerColors.activeColor, fontSize: 11 }}>
                                                                     AUTO
                                                                 </Text>
                                                             </View>
                                                         )}
                                                         {!!displayCodec && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
-                                                                <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 10 }}>
+                                                                <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 11 }}>
                                                                     {displayCodec}
                                                                 </Text>
                                                             </View>
                                                         )}
                                                         {!!displayBitrate && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
-                                                                <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 10 }}>
+                                                                <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 11 }}>
                                                                     {`${displayBitrate} kbps`}
                                                                 </Text>
                                                             </View>
                                                         )}
                                                         {!!displayContainer && displayContainer !== currentTrack.codec && (
                                                             <View style={{ borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.1)' }}>
-                                                                <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 10 }}>
+                                                                <Text variant="labelSmall" style={{ color: playerColors.secondaryTextColor, fontSize: 11 }}>
                                                                     {displayContainer.toUpperCase()}
                                                                 </Text>
                                                             </View>
@@ -945,10 +1238,19 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                             />
                                             <IconButton
                                                 icon="dots-vertical"
-                                                iconColor={playerColors.activeColor}
+                                                /**
+                                                 * Neutral, not the accent. The
+                                                 * accent is reserved for state
+                                                 * (liked, active toggles), so
+                                                 * sharing it with a plain
+                                                 * overflow menu diluted its
+                                                 * meaning.
+                                                 */
+                                                iconColor={inactiveControl}
                                                 size={28}
                                                 onPress={handleOpenTrackMenu}
                                                 style={{ margin: 0 }}
+                                                accessibilityLabel="Track options"
                                             />
                                         </View>
                                     </View>
@@ -956,28 +1258,56 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                             )}
                         </View>
 
-                        {/* Controls (Always Visible) */}
-                        <View>
+                        {/*
+                          Controls.
 
-                            <ProgressControl
-                                activeColor={playerColors.activeColor}
-                                inactiveColor={playerColors.secondaryTextColor}
-                                textColor={playerColors.secondaryTextColor}
-                            />
+                          The progress bar is always present, but in immersive
+                          lyrics mode it drops toward the bottom edge while the
+                          transport row and bottom actions collapse away - so
+                          the lyrics gain that height and the bar stays
+                          reachable. `chromeStyle` collapses the block and
+                          `progressBarStyle` counter-moves the bar itself.
+                        */}
+                        <View style={{ marginBottom: COLLAPSED_HEIGHT + insets.bottom }}>
 
+                            <Reanimated.View style={progressBarStyle}>
+                                <ProgressControl
+                                    activeColor={playerColors.activeColor}
+                                    inactiveColor={playerColors.secondaryTextColor}
+                                    textColor={playerColors.secondaryTextColor}
+                                />
+                            </Reanimated.View>
+
+                            <Reanimated.View style={chromeStyle} pointerEvents={controlsHidden ? 'none' : 'auto'}>
+
+                            {/*
+                              Main transport controls.
+
+                              Sizing follows a deliberate ramp so the primary
+                              action dominates: shuffle/repeat 22, skip 34, play
+                              38 inside a 64dp surface. Previously skip matched
+                              the play glyph at 40 while the surface did all the
+                              visual work, so the hierarchy read flat.
+
+                              Inactive toggles also use a neutral `inactiveControl`
+                              grey rather than the accent, so colour signals
+                              "this is on" instead of tinting the whole row.
+                            */}
                             <View style={styles.controls}>
                                 <IconButton
                                     icon="shuffle"
-                                    iconColor={shuffleMode ? playerColors.activeColor : playerColors.secondaryTextColor}
-                                    size={24}
+                                    iconColor={shuffleMode ? playerColors.activeColor : inactiveControl}
+                                    size={22}
                                     onPress={handleToggleShuffle}
                                     accessibilityLabel={shuffleMode ? "Disable Shuffle" : "Enable Shuffle"}
+                                    accessibilityState={{ selected: shuffleMode }}
                                 />
                                 <IconButton
                                     icon="skip-previous"
-                                    iconColor={(backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.iconColor)}
-                                    size={40}
+                                    iconColor={playerColors.activeColor}
+                                    size={34}
                                     onPress={playPrevious}
+                                    accessibilityLabel="Previous track"
                                 />
                                 <Surface style={[styles.playButton, { backgroundColor: (backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.textColor) }]} elevation={0}>
                                     {isBuffering ? (
@@ -986,42 +1316,57 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                         <IconButton
                                             icon={isPlaying ? "pause" : "play"}
                                             iconColor={getContrastingIconColor((backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.textColor))}
-                                            size={40}
+                                            size={38}
                                             onPress={togglePlayPause}
                                             style={{ margin: 0 }}
+                                            accessibilityLabel={isPlaying ? "Pause" : "Play"}
                                         />
                                     )}
                                 </Surface>
                                 <IconButton
                                     icon="skip-next"
-                                    iconColor={(backgroundType === 'off' || backgroundType === 'blurred') ? playerColors.activeColor : (dynamicColors ? playerColors.activeColor : playerColors.iconColor)}
-                                    size={40}
+                                    iconColor={playerColors.activeColor}
+                                    size={34}
                                     onPress={playNext}
+                                    accessibilityLabel="Next track"
                                 />
                                 <IconButton
                                     icon={repeatMode === 'one' ? "repeat-once" : "repeat"}
-                                    iconColor={repeatMode !== 'off' ? playerColors.activeColor : playerColors.secondaryTextColor}
-                                    size={24}
-                                    onPress={toggleRepeat}
+                                    iconColor={repeatMode !== 'off' ? playerColors.activeColor : inactiveControl}
+                                    size={22}
+                                    onPress={handleToggleRepeat}
+                                    accessibilityLabel={repeatMode === 'off' ? "Enable repeat" : `Repeat ${repeatMode}`}
+                                    accessibilityState={{ selected: repeatMode !== 'off' }}
                                 />
                             </View>
 
+                            {/*
+                              Secondary actions.
+
+                              These are grouped and centred rather than spread
+                              edge-to-edge: `space-between` across the full
+                              width gave three tertiary icons the same visual
+                              weight as the transport row above.
+                            */}
                             <View style={styles.bottomActions}>
                                 {/* Playback Speed Button */}
                                 <IconButton
                                     icon="speedometer"
-                                    iconColor={playbackRate !== 1.0 ? playerColors.activeColor : playerColors.secondaryTextColor}
-                                    size={24}
+                                    iconColor={playbackRate !== 1.0 ? playerColors.activeColor : inactiveControl}
+                                    size={22}
                                     onPress={() => setIsSpeedDialogVisible(true)}
+                                    accessibilityLabel="Playback speed"
                                 />
 
                                 <IconButton
                                     icon="microphone-variant"
-                                    iconColor={isLyricsVisible ? playerColors.activeColor : playerColors.secondaryTextColor}
-                                    size={24}
+                                    iconColor={isLyricsVisible ? playerColors.activeColor : inactiveControl}
+                                    size={22}
                                     onPress={() => {
                                         setIsLyricsVisible(!isLyricsVisible);
                                     }}
+                                    accessibilityLabel={isLyricsVisible ? "Hide lyrics" : "Show lyrics"}
+                                    accessibilityState={{ selected: isLyricsVisible }}
                                 />
 
                                 {/* Sleep Timer Icon */}
@@ -1062,26 +1407,86 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
                                 ) : (
                                     <IconButton
                                         icon="clock-time-four-outline"
-                                        iconColor={playerColors.secondaryTextColor}
-                                        size={24}
+                                        iconColor={inactiveControl}
+                                        size={22}
                                         onPress={() => setIsSleepTimerVisible(true)}
+                                        accessibilityLabel="Sleep timer"
                                     />
                                 )}
 
-                                <IconButton
-                                    icon="playlist-music"
-                                    iconColor={playerColors.secondaryTextColor}
-                                    size={24}
-                                    onPress={() => {
-                                        navigation.navigate('Queue');
-                                        setIsLyricsVisible(false);
-                                    }}
-                                />
                             </View>
+                            </Reanimated.View>
                         </View>
                     </>
                 )}{/* End Landscape Check */}
             </SafeAreaView>
+
+            {isQueueOpen && currentTrack && (
+                <Reanimated.View
+                    pointerEvents="box-none"
+                    style={[styles.miniPlayerOverlay, miniPlayerAnimatedStyle]}
+                >
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: miniPlayerBgColor }]} pointerEvents="none" />
+                    <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+                        <TouchableOpacity
+                            activeOpacity={0.9}
+                            onPress={() => {
+                                queueTranslateY.value = withSpring(
+                                    panelStops.peek,
+                                    SPRING.SHEET_SOFT,
+                                );
+                            }}
+                            style={styles.miniPlayerContent}
+                        >
+                            <View style={styles.miniPlayerArtwork}>
+                                {currentTrack.imageUrl ? (
+                                    <Image source={{ uri: currentTrack.imageUrl }} style={styles.miniPlayerImage} />
+                                ) : (
+                                    <View style={[styles.miniPlayerImage, { backgroundColor: theme.colors.surfaceVariant, justifyContent: 'center', alignItems: 'center' }]}>
+                                        <Icon name="music-note" size={22} color={theme.colors.onSurfaceVariant} />
+                                    </View>
+                                )}
+                            </View>
+                            <View style={styles.miniPlayerInfo}>
+                                <Text numberOfLines={1} style={styles.miniPlayerTitle}>{currentTrack.name}</Text>
+                                <Text numberOfLines={1} style={styles.miniPlayerArtist}>{currentTrack.artist}</Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={togglePlayPause}
+                                style={styles.miniPlayerPlayButton}
+                                accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
+                            >
+                                <Icon name={isPlaying ? "pause" : "play"} size={26} color="#ffffff" />
+                            </TouchableOpacity>
+                        </TouchableOpacity>
+
+                        {/*
+                          Progress bar pinned to the bottom edge of the mini
+                          player. Kept in its own component so position ticks
+                          re-render only the bar, not PlayerScreen.
+                        */}
+                        <View style={styles.miniPlayerProgress} pointerEvents="none">
+                            <QueueMiniProgressBar color={playerColors.activeColor} />
+                        </View>
+                    </SafeAreaView>
+                </Reanimated.View>
+            )}
+
+            <QueuePanel
+                translateY={queueTranslateY}
+                isQueueOpen={isQueueOpen}
+                onQueueOpenChange={setIsQueueOpen}
+                queue={queue}
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                reorderQueue={reorderQueue}
+                removeFromQueue={removeFromQueue}
+                clearQueue={clearQueue}
+                playTrack={playTrack}
+                queueSource={queueSource}
+                panelGradientColors={panelGradientColors}
+                onSavePlaylist={handleSaveQueueAsPlaylist}
+            />
 
             <ActionSheet
                 visible={isSleepTimerVisible}
@@ -1351,18 +1756,26 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
-        padding: 20,
+        paddingHorizontal: 20,
+        paddingTop: 20,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 8,
+        /**
+         * Tight on purpose. The header now only carries the dismiss chevron
+         * (plus the Lyrics label in lyrics mode), so it should take as little
+         * height as possible and hand the rest to the artwork. `height` is
+         * fixed rather than `minHeight` so the Material IconButton's default
+         * 48dp touch target cannot inflate it.
+         */
+        height: 36,
+        marginBottom: 4,
     },
     artworkContainer: {
         alignItems: 'center',
-        marginBottom: 30,
-        // height: width - 80, // Moved to inline style via dynamic height/width from hook
+        marginBottom: 16,
     },
     artworkSurface: {
         elevation: 8,
@@ -1379,7 +1792,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#2a2a2a',
     },
     trackInfo: {
-        marginBottom: 30,
+        marginBottom: 12,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -1389,7 +1802,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 20,
+        marginBottom: 8,
     },
     playButton: {
         width: 64,
@@ -1401,8 +1814,10 @@ const styles = StyleSheet.create({
     },
     bottomActions: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginTop: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 28,
+        marginTop: 4,
     },
     queueList: {
         paddingVertical: 10,
@@ -1419,5 +1834,53 @@ const styles = StyleSheet.create({
         height: 48,
         borderRadius: 4,
         marginRight: 12,
+    },
+    miniPlayerOverlay: {
+        position: 'absolute',
+        top: 0, left: 0, right: 0,
+        zIndex: 101,
+    },
+    miniPlayerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 16,
+    },
+    miniPlayerArtwork: {
+        marginRight: 12,
+    },
+    miniPlayerImage: {
+        width: 48,
+        height: 48,
+        borderRadius: 8,
+    },
+    miniPlayerInfo: {
+        flex: 1,
+        justifyContent: 'center',
+        alignSelf: 'center',
+        marginRight: 4,
+    },
+    miniPlayerTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
+    miniPlayerArtist: {
+        fontSize: 12.5,
+        color: 'rgba(255,255,255,0.7)',
+        marginTop: 2,
+    },
+    miniPlayerPlayButton: {
+        width: 44,
+        height: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    miniPlayerProgress: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
     },
 });

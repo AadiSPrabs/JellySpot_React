@@ -566,19 +566,26 @@ const HomeScreen = React.memo(function HomeScreen() {
             }
         };
 
-        if (isLocal) {
-            // System dialogs will appear
-            performBatchDelete();
-        } else {
-            Alert.alert(
-                'Delete Selected',
-                `Permanently delete ${selectedTracks.size} selected tracks from server?`,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: performBatchDelete }
-                ]
-            );
-        }
+        /**
+         * Confirm both paths; warn harder about the local one.
+         *
+         * This previously deleted local files immediately, on the assumption
+         * that Android's scoped-storage dialogs would provide the safeguard.
+         * They don't: `MediaLibrary.deleteAssetsAsync` only prompts for some
+         * files, and the `FileSystem.deleteAsync` fallback never prompts at
+         * all. Server deletes are recoverable, local deletes are not.
+         */
+        const count = selectedTracks.size;
+        Alert.alert(
+            'Delete Selected',
+            isLocal
+                ? `Permanently delete ${count} ${count === 1 ? 'file' : 'files'} from this device?\n\nThis cannot be undone.`
+                : `Permanently delete ${count} selected ${count === 1 ? 'track' : 'tracks'} from server?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: performBatchDelete },
+            ],
+        );
     };
 
     // Content fade animation for source switching
@@ -995,7 +1002,7 @@ const HomeScreen = React.memo(function HomeScreen() {
 
     // Get image URL - use item's imageUrl for local, or Jellyfin API
     const getItemImageUrl = React.useCallback((item: MediaItem) => {
-        if (dataSource === 'local') return item.imageUrl || null;
+        if (dataSource === 'local') return item.imageUrl || undefined;
         return jellyfinApi.getImageUrl(item.Id, 'Primary', { maxWidth: 400, quality: 90 });
     }, [dataSource]);
 
@@ -1559,8 +1566,15 @@ const HomeScreen = React.memo(function HomeScreen() {
             favoriteItems.length === 0 && (
               <EmptyState
                 icon="server-network-off"
-                title="No items found"
-                description="Your Jellyfin library seems to be empty."
+                title="Nothing to show yet"
+                description="Your Jellyfin library looks empty, or the server could not be reached."
+                /**
+                 * A retry matters here: "empty" and "unreachable" produce the
+                 * same empty arrays, so without an action the user cannot tell
+                 * which happened or recover from the second one.
+                 */
+                actionLabel="Retry"
+                onAction={() => fetchData()}
               />
             )}
           {mostPlayed.length > 0 ? (
@@ -1802,9 +1816,9 @@ const HomeScreen = React.memo(function HomeScreen() {
             <List.Item
               title="Delete from Device"
               description="Permanently remove this track"
-              titleStyle={{ color: "#f44336" }}
+              titleStyle={{ color: theme.colors.error }}
               left={(props) => (
-                <List.Icon {...props} icon="delete" color="#f44336" />
+                <List.Icon {...props} icon="delete" color={theme.colors.error} />
               )}
               onPress={handleDeleteTrack}
             />
