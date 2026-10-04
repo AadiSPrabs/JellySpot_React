@@ -5,9 +5,11 @@ import { Text, useTheme, Portal, Button, IconButton, List, TextInput } from 'rea
 import { jellyfinApi } from '../api/jellyfin';
 import { usePlayerStore } from '../store/playerStore';
 import { usePlaybackSettingsStore } from '../store/playbackSettingsStore';
+import { useSettingsStore } from '../store/settingsStore';
 import ActionSheet from './ActionSheet';
 import ScrollMeter from './ScrollMeter';
 import { lyricsService } from '../services/LyricsService';
+import { fetchJson } from '../services/http';
 import { useShallow } from 'zustand/react/shallow';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,13 +21,30 @@ import Animated, {
   interpolateColor,
   useAnimatedScrollHandler,
   Extrapolate,
+  Easing,
 } from "react-native-reanimated";
+import type { SharedValue } from "react-native-reanimated";
+
+/**
+ * How far the translate / options buttons slide outward when the player
+ * chrome hides. Larger than the icon (20dp) so the travel is still readable
+ * once the fade has taken most of the opacity.
+ */
+const ACTION_BUTTON_SLIDE = 48;
 
 interface LyricsViewProps {
   itemId: string;
   activeColor?: string;
   inactiveColor?: string;
   localLyrics?: string;
+  /**
+   * True while the player chrome is hidden in immersive lyrics mode.
+   *
+   * The translate and options buttons are positioned inside this component,
+   * so they cannot be reached by the parent's chrome animation and are faded
+   * out here instead.
+   */
+  chromeHidden?: boolean;
 }
 
 interface LyricLine {
@@ -53,7 +72,7 @@ const AnimatedLyricLine = React.memo(
     activeColor: string;
     inactiveColor: string;
     onPress: () => void;
-    scrollY: Animated.SharedValue<number>;
+    scrollY: SharedValue<number>;
     index: number;
     containerHeight: number;
   }) => {
@@ -157,7 +176,7 @@ const AnimatedLyricLine = React.memo(
   },
 );
 
-export default function LyricsView({ itemId, activeColor, inactiveColor, localLyrics }: LyricsViewProps) {
+export default function LyricsView({ itemId, activeColor, inactiveColor, localLyrics, chromeHidden = false }: LyricsViewProps) {
     const { positionMillis, currentTrack, seek } = usePlayerStore(useShallow(state => ({
         positionMillis: state.positionMillis,
         currentTrack: state.currentTrack,
@@ -169,7 +188,12 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
 
   const theme = useTheme();
   const activeTextColor = activeColor || theme.colors.primary;
-  const inactiveTextColor = inactiveColor || "rgba(255,255,255,0.5)";
+  /**
+   * 0.62 rather than 0.5. At 0.5 this composited to #8C8C8C on the dark
+   * background - 4.38:1, just under the 4.5:1 WCAG AA floor. A dimmer inactive
+   * line is the right hierarchy, but it has to stay readable to be useful.
+   */
+  const inactiveTextColor = inactiveColor || "rgba(255,255,255,0.62)";
 
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,7 +208,10 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [sourceOverride, setSourceOverride] = useState<'jellyfin' | 'lrclib' | null>(null);
+  const lyricsSourcePreference = useSettingsStore((state) => state.lyricsSourcePreference);
 
   const [tempOffset, setTempOffset] = useState(currentOffset);
   const flatListRef = useRef<FlatList<LyricLine>>(null);
@@ -194,6 +221,42 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
 
   const scrollY = useSharedValue(0);
   const [containerHeight, setContainerHeight] = useState(600);
+
+  /**
+   * Fade for the two action buttons as the player chrome hides.
+   *
+   * They are absolutely positioned at opposite bottom corners - `translate`
+   * on the left, `dots-horizontal` on the right - so each slides toward its
+   * own edge rather than both drifting the same way.
+   *
+   * The square root front-loads the travel. On a linear ramp the icon covers
+   * most of its distance while already faint, which reads as a blink instead
+   * of movement: measured, at 75% opacity a linear ramp had moved only 7dp
+   * against 28dp on this curve.
+   */
+  const buttonFade = useSharedValue(chromeHidden ? 1 : 0);
+  useEffect(() => {
+    buttonFade.value = withTiming(chromeHidden ? 1 : 0, {
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [chromeHidden, buttonFade]);
+
+  const translateButtonStyle = useAnimatedStyle(() => ({
+    opacity: 1 - buttonFade.value,
+    transform: [
+      { translateX: -Math.sqrt(buttonFade.value) * ACTION_BUTTON_SLIDE },
+      { translateY: Math.sqrt(buttonFade.value) * ACTION_BUTTON_SLIDE * 0.35 },
+    ],
+  }));
+
+  const optionsButtonStyle = useAnimatedStyle(() => ({
+    opacity: 1 - buttonFade.value,
+    transform: [
+      { translateX: Math.sqrt(buttonFade.value) * ACTION_BUTTON_SLIDE },
+      { translateY: Math.sqrt(buttonFade.value) * ACTION_BUTTON_SLIDE * 0.35 },
+    ],
+  }));
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -272,7 +335,7 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
 
       try {
         if (isMounted) setLoading(true);
-        const response = await lyricsService.getLyrics(currentTrack);
+        const response = await lyricsService.getLyrics(currentTrack, sourceOverride || undefined);
 
         if (isMounted) {
           if (response.type === "none" || !response.lyrics) {
@@ -332,7 +395,13 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
     localLyrics,
     currentTranslationLanguage,
     refreshTrigger,
+    sourceOverride,
   ]);
+
+  // Reset source override when track changes
+  useEffect(() => {
+    setSourceOverride(null);
+  }, [itemId]);
 
   // Track active index and handle haptics + auto-scroll
   useEffect(() => {
@@ -367,17 +436,49 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
     if (!searchQuery.trim()) return;
     Keyboard.dismiss();
     setIsSearching(true);
+    setSearchError(null);
     try {
-      const res = await fetch(
+      // fetchJson retries transient failures and never throws on an
+      // unparseable body (LRCLIB returns HTML for 5xx), so a server hiccup
+      // surfaces as an error message instead of a JSON SyntaxError.
+      const result = await fetchJson<any[]>(
         `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`,
+        { timeoutMs: 8000, retries: 2 },
       );
-      const data = await res.json();
-      setSearchResults(data || []);
+
+      if (!result.ok) {
+        /**
+         * Distinguish "the service is struggling" from "this device cannot
+         * reach the service". The old copy said "busy" for every failure,
+         * including a device with no public internet - which sent the user
+         * looking at LRCLIB when the problem was local connectivity.
+         */
+        const isConnectionProblem =
+          /network|failed to fetch|unreachable|dns|offline/i.test(result.error ?? '');
+        setSearchError(
+          result.transient
+            ? 'Lyrics service is busy. Please try again in a moment.'
+            : isConnectionProblem
+              ? 'Could not reach the lyrics service. Check your internet connection.'
+              : 'Could not reach the lyrics service.',
+        );
+        setSearchResults([]);
+        return;
+      }
+
+      // A 503 overload body is a JSON object, not an array.
+      const data = Array.isArray(result.data) ? result.data : [];
+      setSearchResults(data);
+      if (data.length === 0) {
+        setSearchError('No lyrics found for that search.');
+      }
     } catch (e) {
       console.error("Lyrics search failed", e);
+      setSearchError('Something went wrong searching for lyrics.');
       setSearchResults([]);
+    } finally {
+      setIsSearching(false);
     }
-    setIsSearching(false);
   };
 
   const handleSelectSearchResult = async (result: any) => {
@@ -440,7 +541,20 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
 
     return (
       <Animated.FlatList
-        key={`lyrics-list-${containerHeight}`}
+        /**
+         * No key that depends on `containerHeight`.
+         *
+         * This list used to be keyed on the measured height
+         * (`lyrics-list-${containerHeight}`), so any resize tore down and
+         * rebuilt the whole FlatList. When the player chrome collapsed or
+         * returned, the lyrics container changed height, the key changed, and
+         * the list remounted - losing its scroll offset and visibly snapping
+         * back to the top before scrolling down to the active line again.
+         *
+         * The height is already handled reactively: the header/footer spacers
+         * and getItemLayout both read `containerHeight`, so the list re-lays
+         * out correctly without being remounted.
+         */
         ref={flatListRef as any}
         data={lyrics}
         renderItem={renderItem}
@@ -501,29 +615,39 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
       {renderContent()}
 
       {/* Action Buttons */}
-      <TouchableOpacity
-        style={styles.settingsButton}
-        onPress={() => setShowSettingsMenu(true)}
+      <Animated.View
+        style={[styles.settingsButton, optionsButtonStyle]}
+        pointerEvents={chromeHidden ? 'none' : 'auto'}
       >
-        <IconButton
-          icon="dots-horizontal"
-          size={20}
-          iconColor={activeTextColor}
-          style={{ backgroundColor: "rgba(255,255,255,0.1)" }}
-        />
-      </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setShowSettingsMenu(true)}
+          accessibilityLabel="Lyrics options"
+        >
+          <IconButton
+            icon="dots-horizontal"
+            size={20}
+            iconColor={activeTextColor}
+            style={{ backgroundColor: "rgba(255,255,255,0.1)" }}
+          />
+        </TouchableOpacity>
+      </Animated.View>
 
-      <TouchableOpacity
-        style={styles.translateButton}
-        onPress={() => setShowTranslateDialog(true)}
+      <Animated.View
+        style={[styles.translateButton, translateButtonStyle]}
+        pointerEvents={chromeHidden ? 'none' : 'auto'}
       >
-        <IconButton
-          icon="translate"
-          size={20}
-          iconColor={activeTextColor}
-          style={{ backgroundColor: "rgba(255,255,255,0.1)" }}
-        />
-      </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setShowTranslateDialog(true)}
+          accessibilityLabel="Translate lyrics"
+        >
+          <IconButton
+            icon="translate"
+            size={20}
+            iconColor={activeTextColor}
+            style={{ backgroundColor: "rgba(255,255,255,0.1)" }}
+          />
+        </TouchableOpacity>
+      </Animated.View>
 
       {/* Dialogs & Menus */}
       <ActionSheet
@@ -585,6 +709,21 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
               setShowSearchDialog(true);
             }}
           />
+          <List.Item
+            title="Lyrics Source"
+            description={`Currently using: ${sourceOverride === 'jellyfin' ? 'Jellyfin' : sourceOverride === 'lrclib' ? 'LRCLib' : (lyricsSourcePreference === 'jellyfin' ? 'Jellyfin' : 'LRCLib')}`}
+            left={(props) => <List.Icon {...props} icon="swap-horizontal" />}
+            onPress={() => {
+              setShowSettingsMenu(false);
+              setSourceOverride((prev) => {
+                if (prev === 'jellyfin') return 'lrclib';
+                if (prev === 'lrclib') return 'jellyfin';
+                // If null, toggle to the opposite of the default preference
+                return lyricsSourcePreference === 'jellyfin' ? 'lrclib' : 'jellyfin';
+              });
+              setRefreshTrigger((prev) => prev + 1);
+            }}
+          />
           {currentSource === "lrclib" && (
             <List.Item
               title="Switch to Jellyfin Lyrics"
@@ -638,8 +777,21 @@ export default function LyricsView({ itemId, activeColor, inactiveColor, localLy
           ) : (
             <FlashList
               data={searchResults}
-              keyExtractor={(item) => item.id.toString()}
-              estimatedItemSize={72}
+              keyExtractor={(item, index) => (item?.id != null ? String(item.id) : `sr-${index}`)}
+              ListEmptyComponent={
+                searchError ? (
+                  <Text
+                    style={{
+                      color: theme.colors.onSurfaceVariant,
+                      textAlign: 'center',
+                      marginTop: 32,
+                      paddingHorizontal: 16,
+                    }}
+                  >
+                    {searchError}
+                  </Text>
+                ) : null
+              }
               renderItem={({ item }: { item: any }) => (
                 <List.Item
                   title={item.name || item.trackName}
