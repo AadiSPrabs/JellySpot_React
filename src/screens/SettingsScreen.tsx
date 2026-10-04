@@ -14,6 +14,7 @@ import { HomeStackParamList } from '../types/navigation';
 import SettingsGroup from '../components/SettingsGroup';
 import SettingsItem from '../components/SettingsItem';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 
 const SettingsScreen = React.memo(function SettingsScreen() {
     const theme = useTheme();
@@ -156,7 +157,14 @@ const SettingsScreen = React.memo(function SettingsScreen() {
 
                 <SettingsGroup title="About">
                     <SettingsItem
-                        title="Version 1.1.3"
+                        /**
+                         * Read from app config rather than hardcoded.
+                         *
+                         * This string had drifted out of step with app.json
+                         * more than once, since bumping the version meant
+                         * remembering to edit it here too.
+                         */
+                        title={`Version ${Constants.expoConfig?.version ?? '—'}`}
                         icon="information-outline"
                     />
                     <SettingsItem
