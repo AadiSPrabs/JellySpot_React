@@ -139,28 +139,7 @@ const SongItemComponent = ({
     );
 };
 
-// Custom comparator to prevent massive re-renders when parent's inline functions change
-const areEqual = (prevProps: SongItemProps, nextProps: SongItemProps) => {
-    // Compare primitive values
-    if (prevProps.isCurrent !== nextProps.isCurrent) return false;
-    if (prevProps.isPlaying !== nextProps.isPlaying) return false;
-    if (prevProps.isSelectionMode !== nextProps.isSelectionMode) return false;
-    if (prevProps.isSelected !== nextProps.isSelected) return false;
-    if (prevProps.isActive !== nextProps.isActive) return false;
-    if (prevProps.showEqualizer !== nextProps.showEqualizer) return false;
-    if (prevProps.index !== nextProps.index) return false;
-
-    // Compare item identifiers (handle both Jellyfin 'Id' and internal 'id')
-    const prevId = prevProps.item?.Id || prevProps.item?.id;
-    const nextId = nextProps.item?.Id || nextProps.item?.id;
-    if (prevId !== nextId) return false;
-
-    // Deep check not needed for performance reasons; if you edit metadata 
-    // it might not reflect instantly, but preventing 600ms freezes is priority #1.
-    return true;
-};
-
-export const SongItem = React.memo(SongItemComponent, areEqual);
+export const SongItem = React.memo(SongItemComponent);
 
 const styles = StyleSheet.create({
     container: {

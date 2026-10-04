@@ -14,15 +14,9 @@ export const OfflineIndicator = () => {
     const theme = useTheme();
     const insets = useSafeAreaInsets();
     const fadeAnim = useRef(new Animated.Value(0)).current;
-    const prevOnline = useRef(isOnline);
-
     const isOffline = !isOnline;
 
     useEffect(() => {
-        if (prevOnline.current !== isOnline) {
-            prevOnline.current = isOnline;
-        }
-
         const shouldShow = isOffline && dataSource !== "local";
 
         Animated.timing(fadeAnim, {

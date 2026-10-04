@@ -3,9 +3,9 @@ import { db } from '../db/client';
 import * as FileSystem from 'expo-file-system/legacy';
 import { tracks, playlists, playlistTracks, playHistory, queueState, cachedTracks } from '../db/schema';
 import { Track } from '../types/track';
+import { generateUuid } from '../utils/uuid';
 
-// Generate a random ID
-const generateId = () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+const generateId = () => generateUuid();
 
 export const DatabaseService = {
     // --- Tracks ---

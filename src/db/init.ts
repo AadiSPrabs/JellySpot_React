@@ -2,6 +2,14 @@ import { openDatabaseSync } from "expo-sqlite";
 
 const db = openDatabaseSync("jellyspot.db");
 
+function tryAddColumn(sql: string) {
+    try {
+        db.execSync(sql);
+    } catch (e: any) {
+        if (!e?.message?.includes('duplicate column')) throw e;
+    }
+}
+
 export const initializeDatabase = () => {
   try {
     db.execSync(`
@@ -44,12 +52,7 @@ export const initializeDatabase = () => {
             );
         `);
 
-        // Migration: Add track_number column if it doesn't exist
-        try {
-            db.execSync('ALTER TABLE tracks ADD COLUMN track_number INTEGER;');
-        } catch (e: any) {
-            if (!e?.message?.includes('duplicate column')) throw e;
-        }
+        tryAddColumn('ALTER TABLE tracks ADD COLUMN track_number INTEGER;');
 
     // Migration: Create play_history table if it doesn't exist
     try {
@@ -65,21 +68,8 @@ export const initializeDatabase = () => {
                 );
             `);
 
-      // Migration: Add source column for existing installs
-      try {
-        db.execSync(
-          "ALTER TABLE play_history ADD COLUMN source TEXT DEFAULT 'local' NOT NULL;",
-        );
-      } catch (e: any) {
-        if (!e?.message?.includes('duplicate column')) throw e;
-      }
-
-      // Migration: Add playlist_id column for existing installs
-      try {
-        db.execSync("ALTER TABLE play_history ADD COLUMN playlist_id TEXT;");
-      } catch (e: any) {
-        if (!e?.message?.includes('duplicate column')) throw e;
-      }
+      tryAddColumn("ALTER TABLE play_history ADD COLUMN source TEXT DEFAULT 'local' NOT NULL;");
+      tryAddColumn("ALTER TABLE play_history ADD COLUMN playlist_id TEXT;");
 
       // Migration: Create cached_tracks table for Jellyfin play history
       db.execSync(`
@@ -136,17 +126,8 @@ export const initializeDatabase = () => {
                 );
             `);
 
-      // Migration: Add group columns if they don't exist (for existing installs)
-      try {
-        db.execSync("ALTER TABLE downloads ADD COLUMN group_id TEXT");
-      } catch (e: any) {
-        if (!e?.message?.includes('duplicate column')) throw e;
-      }
-      try {
-        db.execSync("ALTER TABLE downloads ADD COLUMN group_name TEXT");
-      } catch (e: any) {
-        if (!e?.message?.includes('duplicate column')) throw e;
-      }
+      tryAddColumn("ALTER TABLE downloads ADD COLUMN group_id TEXT");
+      tryAddColumn("ALTER TABLE downloads ADD COLUMN group_name TEXT");
     } catch (e) {
       console.error("Failed to create downloads table:", e);
     }

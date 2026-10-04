@@ -8,6 +8,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { Track } from '../types/track';
+import { generateUuid } from '../utils/uuid';
 
 // Re-export Track for backward compatibility
 export type { Track } from '../types/track';
@@ -66,7 +67,7 @@ export interface LocalLibraryState {
 }
 
 // Generate a random ID
-const generateId = () => Math.random().toString(36).substring(2, 15);
+const generateId = () => generateUuid();
 
 // Helper to extract folder path from file URL
 // e.g., "file:///storage/emulated/0/Music/Artist/song.mp3" -> "/storage/emulated/0/Music/Artist"

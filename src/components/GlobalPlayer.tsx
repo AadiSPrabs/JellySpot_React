@@ -40,15 +40,7 @@ export default function GlobalPlayer() {
     const COLLAPSED_Y = SCREEN_HEIGHT - (MINIPLAYER_HEIGHT + BOTTOM_OFFSET);
     const EXPANDED_Y = 0;
 
-    // Rigid, high-damping spring for a weighted, modern iOS feel (no over-bouncing)
-    const SPRING_CONFIG = { 
-        mass: 1, 
-        damping: 38, 
-        stiffness: 400, 
-        overshootClamping: false,
-        restDisplacementThreshold: 0.1,
-        restSpeedThreshold: 5 
-    };
+    const SPRING_CONFIG = { damping: 30, stiffness: 300, overshootClamping: true };
 
     const translateY = useSharedValue(COLLAPSED_Y + 200); // Initialize offscreen
     const startY = useSharedValue(0);

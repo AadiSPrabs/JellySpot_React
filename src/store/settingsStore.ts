@@ -30,8 +30,6 @@ interface SettingsState {
     setAudioQuality: (quality: 'lossless' | 'high' | 'low' | 'auto') => void;
     lyricsSourcePreference: 'jellyfin' | 'lrclib' | 'offline-only';
     setLyricsSourcePreference: (pref: 'jellyfin' | 'lrclib' | 'offline-only') => void;
-    preferJellyfinLyrics: boolean;
-    setPreferJellyfinLyrics: (prefer: boolean) => void;
     queueLimit: number;
     setQueueLimit: (limit: number) => void;
 }
@@ -52,7 +50,6 @@ export const useSettingsStore = create<SettingsState>()(
             selectedJellyfinLibraries: [],
             audioQuality: 'lossless',
             lyricsSourcePreference: 'lrclib',
-            preferJellyfinLyrics: false,
             queueLimit: 500,
 
             setDataSource: (source) => set({ dataSource: source }),
@@ -67,7 +64,6 @@ export const useSettingsStore = create<SettingsState>()(
             setSelectedJellyfinLibraries: (libraryIds) => set({ selectedJellyfinLibraries: libraryIds }),
             setAudioQuality: (quality) => set({ audioQuality: quality }),
             setLyricsSourcePreference: (pref) => set({ lyricsSourcePreference: pref }),
-            setPreferJellyfinLyrics: (prefer) => set({ preferJellyfinLyrics: prefer }),
             setQueueLimit: (limit) => set({ queueLimit: limit }),
         }),
         {

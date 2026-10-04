@@ -1,5 +1,4 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Network from 'expo-network';
 import { useDownloadStore, Download } from '../store/downloadStore';
@@ -24,9 +23,6 @@ class DownloadService {
   private isRunning = false;
   private customDirectory: Directory | null = null;
 
-  // Batch progress tracking
-  private currentBatchTotal = 0;
-  private currentBatchCompleted = 0;
   private currentBatchGroupName: string | null = null;
 
   // Clean filename for SAF compatibility

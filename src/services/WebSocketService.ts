@@ -147,48 +147,6 @@ class WebSocketService {
     }
   }
 
-  private async handleRemoteCommand(command: any) {
-    // Only handle if we aren't the one initiating? Usually Jellyfin sends to the targeted session
-    const { Name, Arguments } = command;
-    console.log("[WebSocket] Received Remote Command:", Name, Arguments);
-
-    switch (Name) {
-      case "Play":
-        // If ItemId is provided, we should fetch and play it
-        if (Arguments.ItemIds && Arguments.ItemIds.length > 0) {
-          // This would requires more logic to fetch item and play
-        }
-        break;
-      case "TogglePause":
-      case "PlayPause":
-        (this.deps.playerStore || require("../store/playerStore").usePlayerStore).getState().togglePlayPause();
-        break;
-      case "Stop":
-        audioService.stop();
-        break;
-      case "SetVolume":
-        if (Arguments.Volume !== undefined) {
-          audioService.setVolume(Arguments.Volume / 100);
-        }
-        break;
-      case "Seek":
-        if (Arguments.PositionTicks !== undefined) {
-          audioService.seek(Arguments.PositionTicks / 10000); // Ticks to ms
-        }
-        break;
-      case "NextTrack":
-        {
-          (this.deps.playerStore || require("../store/playerStore").usePlayerStore).getState().playNext();
-        }
-        break;
-      case "PreviousTrack":
-        {
-          (this.deps.playerStore || require("../store/playerStore").usePlayerStore).getState().playPrevious();
-        }
-        break;
-    }
-  }
-
   sendMessage(type: string, data: any) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(

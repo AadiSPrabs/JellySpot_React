@@ -1,16 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet, Animated, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Animated, Platform } from 'react-native';
 import { Text, useTheme } from 'react-native-paper';
 import { useSettingsStore } from '../store/settingsStore';
 import { useAuthStore } from '../store/authStore';
 import { useNavigation, CommonActions } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
-
-// Enable LayoutAnimation on Android
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export const SourceSwitcher = () => {
     const { dataSource, setDataSource } = useSettingsStore();

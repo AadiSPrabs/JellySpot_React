@@ -309,18 +309,27 @@ const DetailScreen = React.memo(function DetailScreen() {
             }
         };
 
-        if (isLocal) {
-            performBatchDelete();
-        } else {
-            Alert.alert(
-                'Delete Selected',
-                `Permanently delete ${selectedTracks.size} selected tracks from server?`,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: performBatchDelete }
-                ]
-            );
-        }
+        /**
+         * Confirm BOTH paths, and warn harder about the local one.
+         *
+         * Previously local mode called `performBatchDelete()` directly while
+         * the server path showed a dialog. That had the guard exactly
+         * backwards: a server delete is recoverable (the file is still in the
+         * library and can be re-fetched), but a local delete calls
+         * `MediaLibrary.deleteAssetsAsync` / `FileSystem.deleteAsync` and is
+         * irreversible - the audio file is gone from the device.
+         */
+        const count = selectedTracks.size;
+        Alert.alert(
+            'Delete Selected',
+            isLocal
+                ? `Permanently delete ${count} ${count === 1 ? 'file' : 'files'} from this device?\n\nThis cannot be undone.`
+                : `Permanently delete ${count} selected ${count === 1 ? 'track' : 'tracks'} from server?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: performBatchDelete },
+            ],
+        );
     };
 
     const handleDownloadSelected = async () => {
@@ -370,13 +379,32 @@ const DetailScreen = React.memo(function DetailScreen() {
 
 
 
-    const getPlaylistRandomColor = () => {
+    /**
+     * Deterministic accent for playlists and genres.
+     *
+     * This used `Math.random()`, so a playlist's signature colour changed on
+     * every visit - it read as a bug rather than a feature. Hashing the id
+     * keeps the colour stable per item while still spreading items across the
+     * palette.
+     */
+    const getPlaylistRandomColor = (seed?: string) => {
         const vibrantColors = [
             '#FF4D4D', '#FF9E4D', '#FFD74D', '#4DFF88',
             '#4DFFFF', '#4D88FF', '#9E4DFF', '#FF4DFF',
             '#FF4D88', '#4DFFD7'
         ];
-        return vibrantColors[Math.floor(Math.random() * vibrantColors.length)];
+        if (!seed) {
+            // No stable identity to hash - fall back to the first colour rather
+            // than a random one, so the result is at least repeatable.
+            return vibrantColors[0];
+        }
+        let hash = 0;
+        for (let i = 0; i < seed.length; i++) {
+            // Standard string hash; |0 keeps it in 32-bit range.
+            hash = (hash << 5) - hash + seed.charCodeAt(i);
+            hash |= 0;
+        }
+        return vibrantColors[Math.abs(hash) % vibrantColors.length];
     };
 
     const formatDuration = (ticks: number) => {
@@ -680,7 +708,8 @@ const DetailScreen = React.memo(function DetailScreen() {
                     selectedColor = colors.primary || colors.background;
                 }
             } else if (data.type === 'Playlist' || data.type === 'MusicGenre') {
-                selectedColor = getPlaylistRandomColor();
+                // Seed from the item id so the colour is stable per playlist.
+                selectedColor = getPlaylistRandomColor(data.item?.Id || itemId);
             }
 
             if (selectedColor) {
@@ -990,6 +1019,7 @@ const DetailScreen = React.memo(function DetailScreen() {
 
         // DEEP OPTIMIZATION: Use setRawQueue with store-level mapping
         const mappedTracks = usePlayerStore.getState().setRawQueue(tracks, dataSource, itemId, type || '');
+        usePlayerStore.getState().setQueueSource(item?.Name || 'Queue');
 
         // Provide the EXACT ID of the song I want to play to avoid shuffle misalignment
         const trackIdToPlay = mappedTracks[index].id;
@@ -1006,6 +1036,7 @@ const DetailScreen = React.memo(function DetailScreen() {
 
         // DEEP OPTIMIZATION: Map in store directly
         const mappedTracks = usePlayerStore.getState().setRawQueue(tracks, dataSource, itemId, type || '');
+        usePlayerStore.getState().setQueueSource(item?.Name || 'Queue');
         await usePlayerStore.getState().playTrack(mappedTracks[0]);
     };
 
@@ -1084,6 +1115,7 @@ const DetailScreen = React.memo(function DetailScreen() {
 
         // Map tracks in store, then shuffle via store (single-pass, no double work)
         const mappedTracks = usePlayerStore.getState().setRawQueue(songsToShuffle, dataSource, itemId, type || '');
+        usePlayerStore.getState().setQueueSource(item?.Name || 'Queue');
         // Enable shuffle mode in the store (this shuffles the already-mapped queue)
         const store = usePlayerStore.getState();
         if (!store.shuffleMode) {
@@ -2013,6 +2045,7 @@ const DetailScreen = React.memo(function DetailScreen() {
               backgroundColor: isArtist ? "rgba(0,0,0,0.3)" : "transparent",
             }}
             iconColor={isArtist ? "#fff" : undefined}
+            accessibilityLabel="Go back"
           />
         )}
       </View>
@@ -2165,9 +2198,9 @@ const DetailScreen = React.memo(function DetailScreen() {
           />
           <List.Item
             title="Remove from this playlist"
-            titleStyle={{ color: "#f44336" }}
+            titleStyle={{ color: theme.colors.error }}
             left={(props) => (
-              <List.Icon {...props} icon="playlist-remove" color="#f44336" />
+              <List.Icon {...props} icon="playlist-remove" color={theme.colors.error} />
             )}
             onPress={handleRemoveFromPlaylist}
           />
@@ -2203,9 +2236,9 @@ const DetailScreen = React.memo(function DetailScreen() {
           {dataSource === "local" && (
             <List.Item
               title="Delete from device"
-              titleStyle={{ color: "#f44336" }}
+              titleStyle={{ color: theme.colors.error }}
               left={(props) => (
-                <List.Icon {...props} icon="delete" color="#f44336" />
+                <List.Icon {...props} icon="delete" color={theme.colors.error} />
               )}
               onPress={handleOpenDeleteConfirm}
             />
@@ -2235,7 +2268,7 @@ const DetailScreen = React.memo(function DetailScreen() {
             </Button>
             <Button
               mode="contained"
-              buttonColor="#f44336"
+              buttonColor={theme.colors.error}
               onPress={confirmRemoveFromPlaylist}
             >
               Remove
@@ -2267,7 +2300,7 @@ const DetailScreen = React.memo(function DetailScreen() {
             </Button>
             <Button
               mode="contained"
-              buttonColor="#f44336"
+              buttonColor={theme.colors.error}
               onPress={handleDeleteTrack}
             >
               Delete

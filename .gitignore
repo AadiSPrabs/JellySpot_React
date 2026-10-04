@@ -53,6 +53,9 @@ local.properties
 # opencode AI assistant
 .opencode/
 
+# local shell config (not part of the project)
+nvm.fish
+
 # IDEs
 .vscode/
 .idea/

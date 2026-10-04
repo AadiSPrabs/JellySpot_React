@@ -173,9 +173,6 @@ export const HomeScreenContentSkeleton = ({ isLandscape, numColumns, width }: { 
     );
 };
 
-/** @deprecated Use HomeScreenContentSkeleton instead */
-export const HomeScreenSkeleton = HomeScreenContentSkeleton;
-
 const styles = StyleSheet.create({
     listItem: {
         flexDirection: 'row',
