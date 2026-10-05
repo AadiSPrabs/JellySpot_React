@@ -7,12 +7,16 @@ const path = require("path");
  *
  * Why this exists: `android/` is gitignored, and `eas build` runs a prebuild
  * that regenerates it. Any file dropped into `android/app/src/main/res/`
- * by hand is therefore lost on the next build, which would leave the patched
- * TrackPlayer MusicService referencing a `R.drawable.ic_notification` that no
- * longer exists - a compile error rather than a cosmetic problem.
+ * by hand is therefore lost on the next build.
  *
  * A config plugin runs as part of prebuild, so the drawables are regenerated
  * every time.
+ *
+ * How the icon is picked up: media3's DefaultMediaNotificationProvider
+ * automatically uses a drawable named `media3_notification_small_icon` from
+ * the app module if present — no code changes or patches needed. (An earlier
+ * approach patched react-native-track-player's MusicService.kt to set the
+ * icon in code, but the media3 1.8.0 API doesn't support it that way.)
  *
  * Android renders notification small icons as a white silhouette on
  * transparent. The source asset is the app's monochrome mark, which is already
@@ -52,18 +56,21 @@ module.exports = function withNotificationIcon(config) {
       const sourcePath = path.join(projectRoot, SOURCE);
 
       if (!fs.existsSync(sourcePath)) {
-        // Fail loudly rather than shipping a build that will not compile.
+        // Fail loudly rather than shipping a build with the wrong icon.
         throw new Error(
           `[withNotificationIcon] Missing source icon at ${SOURCE}. ` +
-            `The TrackPlayer patch references R.drawable.ic_notification, ` +
-            `so the build would fail without it.`,
+            `media3 will fall back to its default notification icon.`,
         );
       }
 
       for (const bucket of Object.keys(DENSITIES)) {
         const dir = path.join(resDir, bucket);
         fs.mkdirSync(dir, { recursive: true });
-        fs.copyFileSync(sourcePath, path.join(dir, "ic_notification.png"));
+        // media3's DefaultMediaNotificationProvider picks this up automatically.
+        fs.copyFileSync(
+          sourcePath,
+          path.join(dir, "media3_notification_small_icon.png")
+        );
       }
 
       return cfg;
