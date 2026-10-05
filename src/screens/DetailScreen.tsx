@@ -958,8 +958,9 @@ const DetailScreen = React.memo(function DetailScreen() {
                     await confirmAddToPlaylist(playlistId);
                 }
             } else {
-                // Jellyfin mode - check for duplicates
-                const playlistItems = await jellyfinApi.getItems({ ParentId: playlistId });
+                // Jellyfin mode - check for duplicates (use dedicated playlist endpoint;
+                // tracks are not children of the playlist, so ParentId filter won't work)
+                const playlistItems = await jellyfinApi.getPlaylistItems(playlistId);
                 const existingIds = new Set(playlistItems.Items.map((item: any) => item.Id));
                 const duplicates = trackIdsToAdd.filter(id => existingIds.has(id));
 

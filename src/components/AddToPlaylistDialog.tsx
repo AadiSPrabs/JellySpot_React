@@ -37,8 +37,9 @@ export default function AddToPlaylistDialog({ visible, onDismiss, trackId }: Add
         if (!trackId) return;
 
         try {
-            // Check for duplicates
-            const playlistItems = await jellyfinApi.getItems({ ParentId: playlistId });
+            // Check for duplicates via the dedicated playlist endpoint
+            // (tracks are not children of the playlist, so ParentId won't work)
+            const playlistItems = await jellyfinApi.getPlaylistItems(playlistId);
             const isDuplicate = playlistItems.Items.some((item: any) => item.Id === trackId);
 
             if (isDuplicate) {

@@ -764,20 +764,24 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
     };
 
     const handleAddToPlaylist = async (playlistId: string) => {
-        if (!selectedTrackId) return;
+        // Fall back to the current track if the menu selection was lost
+        const trackId = selectedTrackId || currentTrack?.id;
+        if (!trackId) return;
 
         try {
             if (dataSource === 'local') {
                 const playlist = localLibrary.playlists.find(p => p.id === playlistId);
-                if ((playlist?.trackIds || []).includes(selectedTrackId)) {
+                if ((playlist?.trackIds || []).includes(trackId)) {
                     setPendingPlaylistId(playlistId);
                     setIsDuplicateDialogVisible(true);
                 } else {
                     await confirmAddToPlaylist(playlistId);
                 }
             } else {
-                const playlistItems = await jellyfinApi.getItems({ ParentId: playlistId });
-                const isDuplicate = playlistItems.Items.some((item: any) => item.Id === selectedTrackId);
+                // Use dedicated playlist endpoint; tracks are not children of
+                // the playlist so a ParentId filter returns nothing.
+                const playlistItems = await jellyfinApi.getPlaylistItems(playlistId);
+                const isDuplicate = playlistItems.Items.some((item: any) => item.Id === trackId);
 
                 if (isDuplicate) {
                     setPendingPlaylistId(playlistId);
@@ -793,12 +797,13 @@ const PlayerScreen = React.memo(function PlayerScreen({ isGlobal }: PlayerScreen
     };
 
     const confirmAddToPlaylist = async (playlistId: string) => {
-        if (!selectedTrackId) return;
+        const trackId = selectedTrackId || currentTrack?.id;
+        if (!trackId) return;
         try {
             if (dataSource === 'local') {
-                localLibrary.addToPlaylist(playlistId, selectedTrackId);
+                localLibrary.addToPlaylist(playlistId, trackId);
             } else {
-                await jellyfinApi.addToPlaylist(playlistId, [selectedTrackId]);
+                await jellyfinApi.addToPlaylist(playlistId, [trackId]);
             }
             setIsAddToPlaylistVisible(false);
             setIsDuplicateDialogVisible(false);
